@@ -1,0 +1,45 @@
+---
+description: CLI behavior — show help instead of "Missing command" when a subcommand is omitted
+globs: "**/cli.py"
+alwaysApply: false
+---
+
+# CLI command behavior
+
+When adding or changing CLI commands (Typer/Click or similar), **never** let the CLI error with "Missing command" (or equivalent) when the user invokes a command group without a subcommand. Instead, **show help**: list the available commands, options, and arguments so the user sees what the CLI expects.
+
+## Default behavior
+
+- **Root** (e.g. `modelsync`): show main help (commands, options, args).
+- **Any command group** (e.g. `modelsync db`): show that group's help (subcommands, options, args).
+
+Do not require the user to pass `--help` to get this; treat "no subcommand" as "show what's available."
+
+## How to implement (Typer)
+
+For each Typer app or sub-app that has subcommands:
+
+1. Add a **callback** with `invoke_without_command=True`.
+2. In the callback, if `ctx.invoked_subcommand is None`, call `typer.echo(ctx.get_help())` and `raise typer.Exit(0)`.
+
+Example for the root app:
+
+```python
+@app.callback(invoke_without_command=True)
+def _main_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+```
+
+Example for a sub-app (e.g. `db`):
+
+```python
+@db_app.callback(invoke_without_command=True)
+def _db_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+```
+
+Apply this pattern to **every** command group you add so the CLI stays consistent and user-friendly.

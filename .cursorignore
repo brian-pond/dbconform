@@ -1,0 +1,11 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.git/
+dist/
+build/
+.env
+*.log
+test-data/
+CURSOR_EXAMPLES.md

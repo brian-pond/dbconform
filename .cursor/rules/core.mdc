@@ -1,0 +1,66 @@
+---
+description: Core development guidelines for all code
+alwaysApply: true
+---
+
+# Core Development Rules
+- This project aims to follow the principle of Documentation-Driven Development.
+
+- **Requirements**: See [.cursor/rules/requirements.mdc](.cursor/rules/requirements.mdc) for where requirements live and how to use them.
+
+- **Development Rules**: If altering pyproject.toml, linters, or software dependencies (third party packages/libraries), then follow rules in [.cursor/rules/development.mdc](.cursor/rules/development.mdc).  Otherwise don't add that file to context.
+
+- **CLI conventions**: When adding or changing CLI commands, follow [.cursor/rules/cli-conventions.mdc](.cursor/rules/cli-conventions.mdc) so subcommand groups show help instead of "Missing command".
+
+## Documentation-First Principle
+Before writing ANY code, the AI must:
+1. Read relevant documentation from the `docs/requirements` folder using @docs
+2. Use the requirements rule (above) for the requirements index and which docs to open.
+3. **Confirm**: Before coding, state which doc(s) and sections (or BR-XXX-NNN) the change implements.
+4. **Ask**: If a requirement is missing, ambiguous, or conflicts with another doc, ask the user; do not infer behavior.
+5. Generate code that strictly adheres to documented specifications
+6. Documents in `docs/` folder are for use only by the project owners and AI agents, not external clients.
+7. Technical documentation exists in `docs/technical` folder.
+
+### Help Manage AI Context Size
+- To reduce tokens and context size, suggest splitting a doc only when it is long or mixes multiple concerns; prefer linking from the requirements index over duplicating content.
+
+## Code Generation Process
+1. Reference documentation: Always use @docs/relevant-file.md; prefer paths under **docs/requirements/** for requirements.
+2. Verify against business rules: Check BR-XXX-NNN identifiers
+3. Implement validation: Follow validation rules from docs
+4. Match API contracts: Ensure exact compliance with documented schemas where applicable
+5. Add traceability: Reference doc sections and BR-XXX-NNN in docstrings (and inline comments where useful)
+
+## Never Assume
+- If a requirement is not documented, ask the user before implementing
+- If documentation conflicts, point out the conflict
+- If edge cases aren't covered, propose solutions and document them
+- **Updating docs**: When you change design, APIs, or business rules, update the relevant docs under **docs/requirements/** (and CHANGELOG if applicable) so docs remain the single source of truth.
+
+## Code Quality
+- **Docstrings required**: Every class, function, and method must have a docstring.
+- Type hints for all Python functions
+- Docstrings reference documentation sections
+- Validate all inputs per documented rules
+- Return documented error formats exactly where applicable
+
+## Traceability
+Every function must include:
+- Docstring referencing relevant documentation
+- Business rule identifier (BR-XXX-NNN) where applicable
+- Validation logic matching documented rules
+
+## Unit Tests
+- Tests should reference the same requirement docs (BR-XXX-NNN or section) so behavior is traceable.
+- Tests should not alter persistent data; use temporary or mock data.
+
+## Target Platform
+- Application's target platform for deployment is Linux.
+- Optional: Docker or Podman could be leveraged, but each container's image will be Linux.
+
+## Date and DateTime Format
+Always use ISO 8601.
+
+## Linters
+- Use [Ruff](https://docs.astral.sh/ruff/) for linting (and formatting if adopted). Do not use Pylint.

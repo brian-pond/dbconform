@@ -1,0 +1,25 @@
+---
+description: Project requirements index and how to use them (single source of truth)
+alwaysApply: true
+---
+
+# Requirements
+
+Project requirements live under **docs/requirements/**. They are the single source of truth for what the system should do and how it should behave.
+
+**Cloud agnostic:** modelsync and its requirements are **cloud agnostic**. Deployment, secrets management, and infrastructure choices are not tied to a specific cloud provider (e.g. no requirement to use AWS, Azure, or Google). Examples and recommendations in the requirement docs use vendor-neutral or multi-vendor options where applicable.
+
+## Documents in docs/requirements/
+
+| Document | Purpose |
+|----------|---------|
+| [00-overview.md](docs/requirements/00-overview.md) | Project context, goals, in-scope, out-of-scope |
+| [01-functional.md](docs/requirements/01-functional.md) | Features, user/API flows, acceptance criteria |
+| [02-non-functional.md](docs/requirements/02-non-functional.md) | Performance, security, deployment, observability |
+| [CHANGELOG.md](docs/requirements/CHANGELOG.md) | Requirement changes and versioning |
+
+## How to use
+
+- **Start from** this rule (or open the doc you need). No separate index file to open.
+- **When designing or implementing**: use **00-overview** for context; **01-functional** and **02-non-functional** for behavior and constraints.
+- **Update** requirement docs when you change design or behavior (e.g. new endpoints, new constraints). Add a CHANGELOG entry when you change a requirement (per project convention).
