@@ -5,10 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "modelsync"
 version = "0.1.0"
-description = "Schema and model synchronization — document-driven project."
+description = "Synchronize database models with actuals — document-driven project."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "sqlalchemy>=2.0",
+]
 
 [project.optional-dependencies]
 dev = [

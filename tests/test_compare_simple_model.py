@@ -7,8 +7,7 @@ Database connection, compare() / do_sync(). Acceptance: schema (create tables, c
 
 from pathlib import Path
 
-import pytest
-from sqlmodel import SQLModel, Field
+from sqlmodel import Field, SQLModel
 
 
 # --- Simple data model: one table, 3 columns (string, float, integer) ---
@@ -23,28 +22,10 @@ class SimpleRecord(SQLModel, table=True):
     count: int = Field()
 
 
-# --- Pseudocode: how we would pass Model + Credentials and ask for a comparison ---
-#
-#   import modelsync
-#
-#   # Option A: pass credentials; modelsync opens connection, runs compare, closes
-#   credentials = {"url": "sqlite:///./test.db"}  # or postgres/mariadb URL + schema
-#   target_schema = None  # or "public" for PostgreSQL
-#
-#   sync = modelsync.ModelSync(credentials=credentials, target_schema=target_schema)
-#   plan = sync.compare(SimpleRecord)   # single model
-#   # plan = sync.compare([SimpleRecord, OtherModel, ...])  # or sequence of models
-#
-#   # Option B: pass an existing connection (caller manages lifecycle)
-#   # engine = create_engine(...)
-#   # with engine.connect() as conn:
-#   #     sync = modelsync.ModelSync(connection=conn, target_schema=target_schema)
-#   #     plan = sync.compare(SimpleRecord)
-#
-#   # plan is a list of DDL and data-operation steps (no apply yet; apply=False by default)
-#   # On failure, sync returns a structured Error object: which objects failed and why.
-#
-# --- End pseudocode ---
+# --- ModelSync usage (01-functional: Model discovery, Database connection) ---
+# Option A: credentials — modelsync opens connection, runs compare, closes.
+# Option B: connection — caller manages lifecycle.
+# compare() returns SyncPlan (steps + optional extra_tables) or SyncError on failure.
 
 
 def test_simple_model_has_expected_columns() -> None:
@@ -77,3 +58,79 @@ def test_empty_sqlite_db_fixture(empty_sqlite_db: tuple[Path, str]) -> None:
         names = [row[0] for row in result]
     engine.dispose()
     assert "t" in names
+
+
+def test_compare_empty_db_returns_create_step(empty_sqlite_db: tuple[Path, str]) -> None:
+    """Scenario 1: model has table, DB does not — plan contains CREATE TABLE (01-functional)."""
+    import modelsync
+
+    _path, url = empty_sqlite_db
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
+    result = sync.compare(SimpleRecord)
+    assert not isinstance(result, modelsync.SyncError), str(result)
+    plan = result
+    assert len(plan.steps) == 1
+    assert "simple_record" in plan.sql()
+    assert "CREATE TABLE" in plan.sql()
+
+
+def test_compare_with_connection(empty_sqlite_db: tuple[Path, str]) -> None:
+    """Caller passes connection; compare returns plan (01-functional: pass existing connection)."""
+    from sqlalchemy import create_engine
+
+    import modelsync
+
+    _path, url = empty_sqlite_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        sync = modelsync.ModelSync(connection=conn, target_schema=None)
+        result = sync.compare(SimpleRecord)
+    engine.dispose()
+    assert not isinstance(result, modelsync.SyncError)
+    assert len(result.steps) == 1
+
+
+def test_compare_after_create_same_schema_no_steps(empty_sqlite_db: tuple[Path, str]) -> None:
+    """Scenario 3: table exists in DB and matches model — no steps (schema parity)."""
+    from sqlalchemy import create_engine, text
+
+    import modelsync
+
+    _path, url = empty_sqlite_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE simple_record "
+                "(id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255) NOT NULL, "
+                "value FLOAT NOT NULL, count INTEGER NOT NULL)"
+            )
+        )
+        conn.commit()
+    with engine.connect() as conn:
+        sync = modelsync.ModelSync(connection=conn, target_schema=None)
+        result = sync.compare(SimpleRecord)
+    engine.dispose()
+    assert not isinstance(result, modelsync.SyncError)
+    assert len(result.steps) == 0
+
+
+def test_compare_extra_table_in_db_reported_not_dropped(empty_sqlite_db: tuple[Path, str]) -> None:
+    """Scenario 2: DB has table not in model — reported in extra_tables, no DROP (01-functional)."""
+    from sqlalchemy import create_engine, text
+
+    import modelsync
+
+    _path, url = empty_sqlite_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE other_table (id INTEGER PRIMARY KEY)"))
+        conn.commit()
+    with engine.connect() as conn:
+        sync = modelsync.ModelSync(connection=conn, target_schema=None)
+        result = sync.compare(SimpleRecord)
+    engine.dispose()
+    assert not isinstance(result, modelsync.SyncError)
+    assert len(result.extra_tables) == 1
+    assert result.extra_tables[0].name == "other_table"
+    assert not any("DROP" in (s.sql or "") for s in result.steps)

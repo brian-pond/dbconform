@@ -29,6 +29,9 @@ build/
 .coverage
 htmlcov/
 
+# Inspiration repos (cloned for reference only)
+inspiration_repos/
+
 # OS
 .DS_Store
 Thumbs.db

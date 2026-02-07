@@ -8,7 +8,9 @@ alwaysApply: true
 
 - **Requirements**: See [.cursor/rules/requirements.mdc](.cursor/rules/requirements.mdc) for where requirements live and how to use them.
 
-- **Development Rules**: If altering pyproject.toml, linters, or software dependencies (third party packages/libraries), then follow rules in [.cursor/rules/development.mdc](.cursor/rules/development.mdc).  Otherwise don't add that file to context.
+- **Development Rules**: If altering pyproject.toml, linters, or software dependencies (third party packages/libraries), then follow rules in [.cursor/rules/libraries-packages.mdc](.cursor/rules/libraries-packages.mdc). Otherwise don't add that file to context.
+
+- **README vs docs**: The `@docs` folder (including `docs/requirements/` and `docs/technical/`) is for internal use only (project owners and AI agents). Do not reference `@docs` or those paths in README.md; keep the README for external users (setup, usage, links to public docs or support only).
 
 - **CLI conventions**: When adding or changing CLI commands, follow [.cursor/rules/cli-conventions.mdc](.cursor/rules/cli-conventions.mdc) so subcommand groups show help instead of "Missing command".
 

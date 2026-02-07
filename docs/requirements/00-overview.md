@@ -23,9 +23,12 @@ The Python ecosystem lacks a mature, multi-database, production-ready solution f
 - **Databases:** SQLite, PostgreSQL, MariaDB.
 
 ## Inspiration
-* https://github.com/hunyadi/pysqlsync
-* https://github.com/djrobstep/migra
-* https://github.com/djrobstep/results
+
+- **pysqlsync** (https://github.com/hunyadi/pysqlsync): Primary reference for model-to-database sync. We adopted its split of a canonical schema from two sides (formation from code, discovery from DB), the Mutator-style diff-to-DDL flow, dialect-specific DDL modules, and options for drops (allow_drop, report extra tables). modelsync uses SQLAlchemy/SQLModel and synchronous execution rather than dataclasses and async.
+- **migra** and **results** (https://github.com/djrobstep/migra, https://github.com/djrobstep/results): DB-to-DB comparison tools. Components that informed modelsync's design (we do not ship or depend on them):
+  - **`differences()`** (results/dbdiff/util.py): Compare two keyed structures and return added, removed, modified, and unmodified. We use the same pattern in `schema/diff.py` to compare model schema vs database schema.
+  - **Dependency-ordered DDL**: Migra's `changes.py` and `statements_from_differences()` apply creations/drops in dependency order (e.g. create tables before FKs). Our `SyncPlanBuilder` and `_topological_table_order()` follow the same idea for table creation.
+  - **Table/column change structure**: Migra's `get_table_changes()` diffs columns (added/removed/modified) and emits ALTERs. Our `TableDiff` and plan builder use the same kind of per-table diff (added_columns, modified_columns, etc.) to generate ALTER steps.
 
 ## Out-of-scope
 - **Other databases**: SQL Server, Oracle, and other database engines beyond SQLite, PostgreSQL, and MariaDB.
