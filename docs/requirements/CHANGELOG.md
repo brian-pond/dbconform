@@ -1,10 +1,18 @@
 # Requirements changelog
 
-All notable changes to the requirements docs are recorded here.
+All notable changes to the requirements docs are documented here.
 
 ## [Unreleased]
 
 ### Added
+
+- **01-functional / API**: ModelSync.do_sync(models) — compare then apply the plan in a single transaction; returns SyncPlan on success or SyncError on failure. compare() remains the dry-run entry point.
+- **allow_drop_column**: compare() and do_sync() accept allow_drop_column=False; when True, plan may include DROP COLUMN steps for columns in DB but not in model. Dialect.drop_column_sql() added (SQLite 3.35+).
+- **allow_shrink_column**: compare() and do_sync() accept allow_shrink_column=False; when True, plan may include ALTER COLUMN steps that shrink the column (e.g. reduce VARCHAR length). Dialect.would_shrink() added; default false to avoid data-loss risk without explicit opt-in.
+- Integration tests (table lifecycle, columns add/extra, column type/length/nullability/default) following the 7-step pattern: create table, compare, assert plan, do_sync or no-op, recompare, assert parity or expected ongoing diff. New test modules: test_integration_table_lifecycle.py, test_integration_columns.py, test_integration_column_types.py.
+- Test shared models renamed to avoid "record" (row): SimpleRecord → SimpleTable, OtherRecord → OtherTable, SimpleRecordWideName → SimpleTableWideName; table names simple_table, other_table, simple_table_wide.
+
+### Added (earlier)
 
 - Initial requirements scaffold (00-overview, 01-functional, 02-non-functional).
 - **00-overview**: Goals (single source of truth, safe by default, CI/CD and scriptable, auditability); in-scope models (SQLAlchemy, SQLModel) and DBs (SQLite, PostgreSQL, MariaDB); out-of-scope (other DBs, migration/versioning); technology stack (library-first, CLI for tests in Phase 1).

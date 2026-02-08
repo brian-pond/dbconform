@@ -5,7 +5,7 @@ Single place for modelsync library and package choices: rationale, alternatives,
 ## Purpose
 
 - Document **chosen** packages and **rationale** per category.
-- Record **alternatives** and **optional / later** dependencies.
+- Document **alternatives** and **optional / later** dependencies.
 - Link to requirement docs where relevant.
 
 ## Principles

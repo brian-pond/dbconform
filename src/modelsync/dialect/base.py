@@ -55,6 +55,31 @@ class Dialect(ABC):
         """Generate ALTER TABLE ... ADD COLUMN."""
         ...
 
+    def drop_column_sql(
+        self,
+        _table_name: QualifiedName,
+        _column_name: str,
+    ) -> str | None:
+        """
+        Generate ALTER TABLE ... DROP COLUMN.
+
+        Return None if the dialect does not support dropping columns
+        (e.g. older SQLite). Default implementation returns None.
+        """
+        return None
+
+    def would_shrink(
+        self,
+        _old_column: ColumnDef,
+        _new_column: ColumnDef,
+    ) -> bool:
+        """
+        Return True if applying the new column could shrink existing data
+        (e.g. reducing VARCHAR length). Used to guard alter steps when
+        allow_shrink_column is False.
+        """
+        return False
+
     def alter_column_sql(
         self,
         _table_name: QualifiedName,

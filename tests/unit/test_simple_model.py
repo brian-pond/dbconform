@@ -6,15 +6,15 @@ Traceability: docs/requirements/01-functional.md — Model discovery.
 
 from typing import get_type_hints
 
-from tests.shared_models import SimpleRecord
+from tests.shared_models import SimpleTable
 
 
 def test_simple_model_has_expected_columns() -> None:
     """Verify the simple model defines one table with string, float, and integer columns."""
-    assert SimpleRecord.__tablename__ == "simple_record"
-    assert hasattr(SimpleRecord, "id") and hasattr(SimpleRecord, "name")
-    assert hasattr(SimpleRecord, "value") and hasattr(SimpleRecord, "count")
-    hints = get_type_hints(SimpleRecord)
+    assert SimpleTable.__tablename__ == "simple_table"
+    assert hasattr(SimpleTable, "id") and hasattr(SimpleTable, "name")
+    assert hasattr(SimpleTable, "value") and hasattr(SimpleTable, "count")
+    hints = get_type_hints(SimpleTable)
     assert hints["name"] is str
     assert hints["value"] is float
     assert hints["count"] is int

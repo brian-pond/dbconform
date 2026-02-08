@@ -7,12 +7,25 @@ See docs/requirements/01-functional.md (Schema parity scope).
 
 from __future__ import annotations
 
+import re
+
 from modelsync.dialect.base import Dialect
 from modelsync.schema.objects import (
     ColumnDef,
     QualifiedName,
     TableDef,
 )
+
+
+def _length_from_type_expr(type_expr: str) -> int | None:
+    """Parse VARCHAR(n) or CHAR(n) from type_expr; return n or None."""
+    m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    m = re.match(r"CHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return None
 
 
 class SQLiteDialect(Dialect):
@@ -74,6 +87,20 @@ class SQLiteDialect(Dialect):
             seg += f" DEFAULT {column.default}"
         return f"ALTER TABLE {self.qualified_table(table_name)} ADD COLUMN {seg}"
 
+    def would_shrink(
+        self,
+        old_column: ColumnDef,
+        new_column: ColumnDef,
+    ) -> bool:
+        """True if new column has a smaller length than old (VARCHAR/CHAR)."""
+        old_len = _length_from_type_expr(old_column.type_expr)
+        new_len = _length_from_type_expr(new_column.type_expr)
+        return (
+            old_len is not None
+            and new_len is not None
+            and new_len < old_len
+        )
+
     def alter_column_sql(
         self,
         _table_name: QualifiedName,
@@ -90,3 +117,14 @@ class SQLiteDialect(Dialect):
     ) -> str | None:
         """SQLite does not support ADD PRIMARY KEY via ALTER TABLE."""
         return None
+
+    def drop_column_sql(
+        self,
+        table_name: QualifiedName,
+        column_name: str,
+    ) -> str | None:
+        """SQLite 3.35+ supports ALTER TABLE ... DROP COLUMN."""
+        return (
+            f"ALTER TABLE {self.qualified_table(table_name)} "
+            f'DROP COLUMN {self._quote(column_name)}'
+        )

@@ -61,8 +61,11 @@ class SyncPlanBuilder:
     """
     Builds a SyncPlan from DiffResult and dialect.
 
-    Does not emit DROP unless allow_drop_table is True. Tables in DB but not
-    in model are recorded in plan.extra_tables for reporting only.
+    Does not emit DROP TABLE unless allow_drop_table is True. Does not emit
+    DROP COLUMN unless allow_drop_column is True. Does not emit ALTER COLUMN
+    when the change would shrink the column (e.g. reduce length) unless
+    allow_shrink_column is True. Tables in DB but not in model are listed
+    in plan.extra_tables for reporting only.
     """
 
     def __init__(
@@ -70,10 +73,14 @@ class SyncPlanBuilder:
         dialect: Dialect,
         *,
         allow_drop_table: bool = False,
+        allow_drop_column: bool = False,
+        allow_shrink_column: bool = False,
         report_extra_tables: bool = True,
     ) -> None:
         self.dialect = dialect
         self.allow_drop_table = allow_drop_table
+        self.allow_drop_column = allow_drop_column
+        self.allow_shrink_column = allow_shrink_column
         self.report_extra_tables = report_extra_tables
 
     def build(self, diff: DiffResult) -> SyncPlan:
@@ -99,6 +106,17 @@ class SyncPlanBuilder:
             )
 
         for name, table_diff in diff.modified_tables.items():
+            if self.allow_drop_column:
+                for col in table_diff.removed_columns:
+                    drop_sql = self.dialect.drop_column_sql(name, col.name)
+                    if drop_sql:
+                        steps.append(
+                            AlterTableStep(
+                                description=f"Drop column {col.name} from {name}",
+                                sql=drop_sql,
+                                table_name=name,
+                            )
+                        )
             for col in table_diff.added_columns:
                 sql = self.dialect.add_column_sql(name, col)
                 steps.append(
@@ -112,6 +130,8 @@ class SyncPlanBuilder:
             for old_col, new_col in table_diff.modified_columns:
                 alter_sql = self.dialect.alter_column_sql(name, old_col, new_col)
                 if alter_sql:
+                    if self.dialect.would_shrink(old_col, new_col) and not self.allow_shrink_column:
+                        continue
                     steps.append(
                         AlterTableStep(
                             description=f"Alter column {new_col.name} on {name}",

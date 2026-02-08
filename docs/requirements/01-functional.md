@@ -25,7 +25,7 @@
 - **Suggestion**: A minimal sync CLI (e.g. one command that accepts a model module and DB URL and runs compare/sync) could be added later for ad-hoc runs or CI without writing Python; this is optional and not required for Phase 1.
 
 ### Sync flow and confirmation
-- **API**: No execution unless the caller passes an explicit apply option (default: false). The library returns a plan (DDL and data-operation steps) for inspection or for the caller to execute elsewhere. Output-only mode must be available: emit planned DDL and data operations to stdout or file with no apply and no prompt.
+- **API**: No execution unless the caller uses apply. The library exposes **compare(models)** (dry-run: returns a plan only) and **do_sync(models)** (compare then apply the plan in one transaction). So dry-run is the default when using compare(); apply happens only when the caller invokes do_sync(). The library returns a plan (DDL and data-operation steps) for inspection or for the caller to execute elsewhere. Output-only mode is available by using compare() and emitting plan SQL (e.g. plan.sql()) to stdout or file.
 - **CLI** (when a sync CLI is provided): Same semantics—dry-run by default; user prompted to confirm (e.g. "Apply these changes? [y/N]") before execution.
 - **Destructive changes**: By default only add/alter; drops and other destructive changes require explicit opt-in from the caller (or user, when using CLI).
 
@@ -53,7 +53,7 @@ Elements that modelsync compares and corrects (add/alter as per default behavior
 - **Backfilling**: When new columns are added, modelsync can backfill them with default or constant values where applicable.
 - **Type changes**: When column types are altered, existing data may be transformed to match the new type.
 - **Adding NOT NULL to a column that contains NULLs**: If the model defines a **default** for that column, modelsync applies it (backfill) so the column can be made NOT NULL. If the model has **no default**, modelsync **errors** and requires the caller to backfill the NULLs themselves before retrying sync.
-- **Data-loss risk**: When a change may cause data loss (e.g. reducing the length of a string field and truncation), modelsync must warn and require explicit confirmation before applying.
+- **Data-loss risk**: When a change may cause data loss (e.g. reducing the length of a string field), modelsync does not emit the ALTER step unless the caller sets **allow_shrink_column** (e.g. `compare(..., allow_shrink_column=True)`). Default is false so shrinking a column requires explicit opt-in.
 
 ### Column rename (future phase — Phase 2)
 - **Goal**: Support indicating that a column was renamed in the model (e.g. `bar` → `baz` on table `foo`). Some databases support `RENAME COLUMN`; others require: add new column → copy data from old column → drop old column.
