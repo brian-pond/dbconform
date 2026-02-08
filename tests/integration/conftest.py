@@ -1,5 +1,5 @@
 """
-Pytest fixtures for modelsync tests.
+Pytest fixtures for integration tests.
 
 Test database strategy (docs/technical/01-test-database.md):
 - Use pytest's tmp_path (not home dir) for writable, isolated, auto-cleaned paths.

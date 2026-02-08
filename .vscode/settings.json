@@ -12,5 +12,6 @@
     "**/*.pyo": true,
     "**/*.egg-info": true,
     ".ruff_cache": true,
+    ".pytest_cache": true
   }
 }
