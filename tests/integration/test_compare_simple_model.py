@@ -56,6 +56,26 @@ def test_compare_with_connection(empty_sqlite_db: tuple[Path, str]) -> None:
     assert len(result.steps) == 1
 
 
+def test_do_sync_with_connection_caller_closes(empty_sqlite_db: tuple[Path, str]) -> None:
+    """Caller passes connection; do_sync applies plan; caller closes connection (01-functional)."""
+    _path, url = empty_sqlite_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        sync = modelsync.ModelSync(connection=conn, target_schema=None)
+        result = sync.do_sync(SimpleTable)
+    engine.dispose()
+    assert not isinstance(result, modelsync.SyncError), str(result)
+    assert len(result.steps) == 1
+    # Reopen and recompare to confirm schema parity
+    engine2 = create_engine(url)
+    with engine2.connect() as conn2:
+        sync2 = modelsync.ModelSync(connection=conn2, target_schema=None)
+        recompare = sync2.compare(SimpleTable)
+    engine2.dispose()
+    assert not isinstance(recompare, modelsync.SyncError)
+    assert len(recompare.steps) == 0
+
+
 def test_compare_after_create_same_schema_no_steps(empty_sqlite_db: tuple[Path, str]) -> None:
     """Scenario 3: table exists in DB and matches model — no steps (schema parity)."""
     _path, url = empty_sqlite_db

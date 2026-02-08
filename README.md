@@ -38,7 +38,28 @@ See `tests/TESTS_README.md` for how tests are organized.
 
 Use modelsync as a library: define your models (e.g. SQLAlchemy or SQLModel), then compare them to the database. By default, only a plan is produced; apply only when you explicitly opt in.
 
-Define one or more models and pass them (single class or a list) to `compare()`. modelsync compares the combined model schema to the actual database tables and returns a plan of DDL steps.
+### ModelSync: the three main entry points
+
+**1. `ModelSync(...)` — set up the connection**
+
+Create a `ModelSync` instance by passing either:
+
+- **`credentials={"url": "sqlite:///./mydb.sqlite"}`** — modelsync will open the database, run your call, then close it. No need to manage the connection yourself.
+- **`connection=engine.connect()`** — you provide an open connection; you are responsible for closing it when done.
+
+For databases that use schemas (e.g. PostgreSQL), also pass **`target_schema="public"`** (or your schema name). For SQLite you can omit it.
+
+**2. `compare(models)` — see what would change (dry run)**
+
+Pass one model class or a list of model classes. modelsync compares their combined schema to the live database and returns a **plan** of steps (create table, add column, add constraint, etc.) without executing anything. Use this to inspect changes, log them, or generate a DDL script with `plan.sql()`. Returns a `SyncPlan` or a `SyncError` if something went wrong.
+
+**3. `do_sync(models)` — apply the changes**
+
+Same comparison as `compare()`, but **runs** the plan against the database. By default all steps run in one transaction: if any step fails, everything is rolled back. Returns the applied `SyncPlan` on success or a `SyncError` on failure. Optional: `commit_per_step=True` to commit after each step (partial progress on failure), or `log_file="path"` to append applied steps to a file.
+
+---
+
+Define one or more models and pass them (single class or a list) to `compare()` or `do_sync()`. The example below uses `compare()` to get a plan.
 
 ```python
 from sqlalchemy import Column, Float, ForeignKey, Integer, String
@@ -59,7 +80,6 @@ class Cart(DeclarativeBase):
     quantity = Column(Integer, nullable=False)
 
 sync = ModelSync(credentials={"url": "sqlite:///./mydb.sqlite"})
-# To use an existing connection instead: `ModelSync(connection=engine.connect())`.
 result_plan = sync.compare([Product, Cart])
 
 if isinstance(result_plan, SyncError):
@@ -71,6 +91,18 @@ else:
         for step in result_plan.steps:
             print(step)
         # result_plan.sql() returns the full DDL script for inspection or manual execution
+```
+
+**Using your own connection** — you open the connection and close it yourself:
+
+```python
+from sqlalchemy import create_engine
+
+engine = create_engine("sqlite:///./mydb.sqlite")
+with engine.connect() as conn:
+    sync = ModelSync(connection=conn)
+    result_plan = sync.compare([Product, Cart])
+engine.dispose()
 ```
 
 ### Possible Outcomes
@@ -94,4 +126,19 @@ Add column quantity to cart
 ```
 
 To get the full DDL script as a single string, use `result_plan.sql()`.
+
+### Applying the plan with do_sync()
+
+To compare and apply the plan in one go (run the DDL against the database), use `do_sync()`. It uses the same comparison as `compare()` but executes the steps in a single transaction (all-or-nothing; rollback on failure). Returns the applied `SyncPlan` on success or `SyncError` on failure.
+
+```python
+result_plan = sync.do_sync([Product, Cart])
+
+if isinstance(result_plan, SyncError):
+    print("Sync failed:", result_plan.messages)
+else:
+    print(f"Applied {len(result_plan.steps)} step(s). Schema is now in sync.")
+```
+
+Optional: `do_sync(..., commit_per_step=True)` commits after each step so partial progress is kept if a later step fails. `do_sync(..., log_file="/path/to/sync.log")` appends applied steps as JSON lines to a file.
 

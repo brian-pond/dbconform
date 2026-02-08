@@ -57,6 +57,9 @@ Every function must include:
 - Tests should reference the same requirement docs (BR-XXX-NNN or section) so behavior is traceable.
 - Tests should not alter persistent data; use temporary or mock data.
 
+## Running tests
+- This project uses **uv** for dependency and environment management. Run tests with **`uv run pytest`** (e.g. `uv run pytest tests/` or `uv run pytest path/to/test_file.py`). Do not try `python` or `python3 -m pytest` first; use `uv run pytest` so the correct environment is used without trial-and-error.
+
 ## Target Platform
 - Application's target platform for deployment is Linux.
 - Optional: Docker or Podman could be leveraged, but each container's image will be Linux.
