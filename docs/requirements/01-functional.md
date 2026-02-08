@@ -28,9 +28,14 @@
 - **API**: No execution unless the caller uses apply. The library exposes **compare(models)** (dry-run: returns a plan only) and **do_sync(models)** (compare then apply the plan in one transaction). So dry-run is the default when using compare(); apply happens only when the caller invokes do_sync(). The library returns a plan (DDL and data-operation steps) for inspection or for the caller to execute elsewhere. Output-only mode is available by using compare() and emitting plan SQL (e.g. plan.sql()) to stdout or file.
 - **CLI** (when a sync CLI is provided): Same semantics—dry-run by default; user prompted to confirm (e.g. "Apply these changes? [y/N]") before execution.
 - **Destructive changes**: By default only add/alter; drops and other destructive changes require explicit opt-in from the caller (or user, when using CLI).
+- **Opt-in flags**: The API exposes four boolean flags on `compare()` and `do_sync()`:
+  - **allow_drop_table**: when True, the plan may include DROP TABLE steps for tables present in the DB but not in the model. Default false.
+  - **allow_drop_column**: when True, the plan may include DROP COLUMN steps for columns present in the DB but not in the model. Default false.
+  - **allow_drop_constraint**: when True (default), the plan may include DROP CONSTRAINT / DROP INDEX steps for unique, foreign key, check, or index objects removed from the model. Default True because dropping a constraint or index does not cause data loss and is easily reversible.
+  - **allow_shrink_column**: when True, the plan may include ALTER COLUMN steps that shrink a column (e.g. reduce VARCHAR length); when False (default), such changes are omitted to avoid data-loss risk unless the caller opts in.
 
 ### Transaction behavior
-- Transaction behavior is **configurable**. **Default:** all-or-nothing—if any step fails during apply, the entire sync is rolled back. Alternative behavior (e.g. commit per step) may be offered as an option when supported.
+- Transaction behavior is **configurable**. **Default:** all-or-nothing—if any step fails during apply, the entire sync is rolled back. **Option:** `commit_per_step=True` on `do_sync()` commits after each step so that prior steps persist if a later step fails.
 
 ### Plan and DDL order
 - DDL and data-operation steps must be produced in a **valid execution order**: dependencies must be respected (e.g. create table before creating a foreign key that references it). Documentation and implementation must reflect this.

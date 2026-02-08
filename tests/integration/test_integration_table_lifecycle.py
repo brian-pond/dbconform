@@ -81,6 +81,34 @@ def test_extra_table_reported_no_drop_recompare_still_extra(
     assert recompare.extra_tables[0].name == "other_table"
 
 
+def test_extra_table_dropped_when_allow_drop_table(
+    empty_sqlite_db: tuple[Path, str],
+) -> None:
+    """Extra table in DB; compare(allow_drop_table=True) has DROP; do_sync drops it; recompare 0 extra (01-functional: Opt-in flags)."""
+    _path, url = empty_sqlite_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE other_table (id INTEGER PRIMARY KEY)"))
+        conn.commit()
+    engine.dispose()
+
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
+    plan_or_err = sync.compare(SimpleTable, allow_drop_table=True)
+    assert not isinstance(plan_or_err, modelsync.SyncError)
+    # Plan: DROP TABLE other_table (extra) + CREATE TABLE simple_table (missing)
+    assert len(plan_or_err.steps) >= 1
+    drop_steps = [s for s in plan_or_err.steps if s.sql and "DROP TABLE" in s.sql]
+    assert len(drop_steps) == 1
+    assert "other_table" in (drop_steps[0].sql or "")
+
+    result = sync.do_sync(SimpleTable, allow_drop_table=True)
+    assert not isinstance(result, modelsync.SyncError)
+    recompare = sync.compare(SimpleTable)
+    assert not isinstance(recompare, modelsync.SyncError)
+    assert len(recompare.extra_tables) == 0
+    assert len(recompare.steps) == 0
+
+
 def test_two_tables_one_missing_do_sync_both_present(
     empty_sqlite_db: tuple[Path, str],
 ) -> None:

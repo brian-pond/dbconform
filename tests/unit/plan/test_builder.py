@@ -2,16 +2,18 @@
 Unit tests for SyncPlanBuilder.
 
 Traceability: docs/requirements/01-functional.md (Plan and DDL order,
-Destructive changes). Extra tables from removed_tables; no DROP by default.
+Destructive changes, Opt-in flags). Extra tables from removed_tables;
+no DROP by default; allow_drop_table/allow_drop_column/allow_shrink_column
+control destructive steps.
 """
 
 from collections import OrderedDict
 
 from modelsync.dialect.sqlite import SQLiteDialect
 from modelsync.plan.builder import SyncPlanBuilder
-from modelsync.plan.steps import SyncPlan
+from modelsync.plan.steps import DropTableStep, SyncPlan
 from modelsync.schema.diff import DiffResult, TableDiff
-from modelsync.schema.objects import ColumnDef, QualifiedName, TableDef
+from modelsync.schema.objects import ColumnDef, IndexDef, QualifiedName, TableDef
 
 
 def test_sync_plan_statements_and_sql() -> None:
@@ -40,7 +42,7 @@ def test_builder_added_table_produces_create_step() -> None:
 
 
 def test_builder_removed_table_in_extra_no_drop() -> None:
-    """Removed table (DB-only) -> extra_tables, no DROP step."""
+    """Removed table (DB-only) -> extra_tables, no DROP step when allow_drop_table=False."""
     diff = DiffResult(
         added_tables=OrderedDict(),
         removed_tables=OrderedDict([
@@ -55,6 +57,26 @@ def test_builder_removed_table_in_extra_no_drop() -> None:
     assert len(plan.steps) == 0
     assert len(plan.extra_tables) == 1
     assert plan.extra_tables[0].name == "orphan"
+
+
+def test_builder_removed_table_drop_when_allow_drop_table() -> None:
+    """Removed table (DB-only) -> DROP TABLE step when allow_drop_table=True (01-functional: Opt-in flags)."""
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict([
+            (QualifiedName(None, "orphan"), TableDef(
+                name=QualifiedName(None, "orphan"),
+                columns=(ColumnDef("id", "INTEGER", nullable=False),),
+            )),
+        ]),
+        modified_tables=OrderedDict(),
+    )
+    plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_table=True).build(diff)
+    assert len(plan.steps) == 1
+    assert isinstance(plan.steps[0], DropTableStep)
+    assert plan.steps[0].table_name.name == "orphan"
+    assert "DROP TABLE" in (plan.steps[0].sql or "")
+    assert "orphan" in (plan.steps[0].sql or "")
 
 
 def test_builder_removed_column_drop_when_allow_drop_column() -> None:
@@ -167,6 +189,68 @@ def test_builder_report_extra_tables_false() -> None:
     )
     plan = SyncPlanBuilder(SQLiteDialect(), report_extra_tables=False).build(diff)
     assert len(plan.extra_tables) == 0
+
+
+def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
+    """Modified table with removed index -> DROP INDEX step when allow_drop_constraint=True (default) (01-functional: add/remove constraints)."""
+    from modelsync.schema.diff import TableDiff
+
+    qualified = QualifiedName(None, "t")
+    old_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+        indexes=(IndexDef("idx_t_id", ("id",), False),),
+    )
+    new_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+        indexes=(),
+    )
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict(),
+        modified_tables=OrderedDict([
+            (qualified, TableDiff(
+                old_table=old_table,
+                new_table=new_table,
+                removed_indexes=(IndexDef("idx_t_id", ("id",), False),),
+            )),
+        ]),
+    )
+    plan = SyncPlanBuilder(SQLiteDialect()).build(diff)  # default allow_drop_constraint=True
+    assert len(plan.steps) == 1
+    assert "DROP INDEX" in (plan.steps[0].sql or "")
+    assert "idx_t_id" in (plan.steps[0].sql or "")
+
+
+def test_builder_removed_index_no_drop_when_allow_drop_constraint_false() -> None:
+    """Modified table with removed index -> no DROP step when allow_drop_constraint=False."""
+    from modelsync.schema.diff import TableDiff
+
+    qualified = QualifiedName(None, "t")
+    old_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+        indexes=(IndexDef("idx_t_id", ("id",), False),),
+    )
+    new_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+        indexes=(),
+    )
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict(),
+        modified_tables=OrderedDict([
+            (qualified, TableDiff(
+                old_table=old_table,
+                new_table=new_table,
+                removed_indexes=(IndexDef("idx_t_id", ("id",), False),),
+            )),
+        ]),
+    )
+    plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_constraint=False).build(diff)
+    assert len(plan.steps) == 0
 
 
 def test_builder_fk_order_parent_before_child() -> None:

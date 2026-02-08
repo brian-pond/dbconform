@@ -10,6 +10,7 @@ from modelsync.plan.steps import (
     AlterTableStep,
     CreateIndexStep,
     CreateTableStep,
+    DropTableStep,
     SyncPlan,
     SyncStep,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "AlterTableStep",
     "CreateIndexStep",
     "CreateTableStep",
+    "DropTableStep",
     "SyncPlan",
     "SyncPlanBuilder",
     "SyncStep",

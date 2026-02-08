@@ -65,6 +65,15 @@ class CreateIndexStep(SyncStep):
 
 
 @dataclass
+class DropTableStep(SyncStep):
+    """Drop a table. Emitted only when allow_drop_table=True (01-functional: Opt-in flags)."""
+
+    table_name: QualifiedName = field(
+        default_factory=lambda: QualifiedName(schema=None, name="")
+    )
+
+
+@dataclass
 class SyncPlan:
     """
     Ordered list of DDL and data-operation steps plus optional extra tables.

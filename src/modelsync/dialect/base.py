@@ -148,3 +148,49 @@ class Dialect(ABC):
         cols = ", ".join(self._quote(c) for c in index.column_names)
         tbl = self.qualified_table(table_name)
         return f"CREATE {uniq}INDEX {self._quote(index.name)} ON {tbl} ({cols})"
+
+    def drop_table_sql(self, table_name: QualifiedName) -> str:
+        """Generate DROP TABLE. Used when allow_drop_table=True (01-functional: Opt-in flags)."""
+        return f"DROP TABLE IF EXISTS {self.qualified_table(table_name)}"
+
+    def drop_unique_sql(
+        self,
+        table_name: QualifiedName,
+        unique: UniqueDef,
+    ) -> str | None:
+        """Generate ALTER TABLE ... DROP CONSTRAINT for unique. None if not supported."""
+        if not unique.name:
+            return None
+        tbl = self.qualified_table(table_name)
+        return f"ALTER TABLE {tbl} DROP CONSTRAINT {self._quote(unique.name)}"
+
+    def drop_foreign_key_sql(
+        self,
+        table_name: QualifiedName,
+        fk: ForeignKeyDef,
+    ) -> str | None:
+        """Generate ALTER TABLE ... DROP CONSTRAINT for foreign key. None if not supported."""
+        if not fk.name:
+            return None
+        tbl = self.qualified_table(table_name)
+        return f"ALTER TABLE {tbl} DROP CONSTRAINT {self._quote(fk.name)}"
+
+    def drop_check_sql(
+        self,
+        table_name: QualifiedName,
+        check: CheckDef,
+    ) -> str | None:
+        """Generate ALTER TABLE ... DROP CONSTRAINT for check. None if not supported."""
+        if not check.name:
+            return None
+        tbl = self.qualified_table(table_name)
+        return f"ALTER TABLE {tbl} DROP CONSTRAINT {self._quote(check.name)}"
+
+    def drop_index_sql(
+        self,
+        index_name: str,
+        table_name: QualifiedName,
+    ) -> str:
+        """Generate DROP INDEX."""
+        tbl = self.qualified_table(table_name)
+        return f"DROP INDEX IF EXISTS {self._quote(index_name)}"

@@ -7,8 +7,13 @@ All notable changes to the requirements docs are documented here.
 ### Added
 
 - **01-functional / API**: ModelSync.do_sync(models) — compare then apply the plan in a single transaction; returns SyncPlan on success or SyncError on failure. compare() remains the dry-run entry point.
+- **allow_drop_table**: compare() and do_sync() accept allow_drop_table=False; when True, plan may include DROP TABLE steps for tables in DB but not in model. DropTableStep and Dialect.drop_table_sql() added.
 - **allow_drop_column**: compare() and do_sync() accept allow_drop_column=False; when True, plan may include DROP COLUMN steps for columns in DB but not in model. Dialect.drop_column_sql() added (SQLite 3.35+).
+- **allow_drop_constraint**: compare() and do_sync() accept allow_drop_constraint=True (default); when True, plan may include DROP CONSTRAINT / DROP INDEX for removed unique, foreign key, check, or index. Default True (no data loss, easily reversible). Dialect drop_unique_sql, drop_foreign_key_sql, drop_check_sql, drop_index_sql added (SQLite: only drop_index_sql; constraint drops return None).
 - **allow_shrink_column**: compare() and do_sync() accept allow_shrink_column=False; when True, plan may include ALTER COLUMN steps that shrink the column (e.g. reduce VARCHAR length). Dialect.would_shrink() added; default false to avoid data-loss risk without explicit opt-in.
+- **Transaction behavior**: do_sync(..., commit_per_step=True) commits after each step (configurable per 01-functional).
+- **Error handling**: SyncError.target_objects populated on compare or apply failure so callers can identify which target failed (01-functional: Error handling).
+- **02-non-functional / Observability**: Applied steps logged as JSON lines to stdout (machine-parseable); do_sync(..., log_file=path) optionally appends to a file. No secrets in logs.
 - Integration tests (table lifecycle, columns add/extra, column type/length/nullability/default) following the 7-step pattern: create table, compare, assert plan, do_sync or no-op, recompare, assert parity or expected ongoing diff. New test modules: test_integration_table_lifecycle.py, test_integration_columns.py, test_integration_column_types.py.
 - Test shared models renamed to avoid "record" (row): SimpleRecord → SimpleTable, OtherRecord → OtherTable, SimpleRecordWideName → SimpleTableWideName; table names simple_table, other_table, simple_table_wide.
 

@@ -8,6 +8,8 @@ Target schema, Sync flow) and docs/technical/02-architecture.md.
 
 from __future__ import annotations
 
+import json
+import sys
 from collections.abc import Sequence
 from typing import Any
 
@@ -17,8 +19,47 @@ from sqlalchemy.engine import Connection, Engine
 from modelsync.dialect import Dialect, SQLiteDialect
 from modelsync.errors import SyncError
 from modelsync.plan import SyncPlan, SyncPlanBuilder
+from modelsync.plan.steps import (
+    AlterTableStep,
+    CreateIndexStep,
+    CreateTableStep,
+    DropTableStep,
+    SyncStep,
+)
 from modelsync.schema import DatabaseSchema, ModelSchema
 from modelsync.schema.diff import SchemaDiffer
+
+
+def _emit_apply_log(
+    step_index: int,
+    description: str,
+    *,
+    log_file: str | None = None,
+) -> None:
+    """
+    Emit a structured (JSON) log line for an applied step (02-non-functional: Observability).
+
+    No secrets or connection data are included. Writes to stdout and optionally to log_file.
+    """
+    record = {"event": "apply_step", "step_index": step_index, "description": description}
+    line = json.dumps(record) + "\n"
+    sys.stdout.write(line)
+    sys.stdout.flush()
+    if log_file:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(line)
+
+
+def _step_target(step: SyncStep, index: int) -> tuple[str, str]:
+    """Return (object_type, identifier) for a step (01-functional: Error handling)."""
+    if isinstance(step, DropTableStep):
+        return ("table", str(step.table_name))
+    if isinstance(step, (CreateTableStep, AlterTableStep, CreateIndexStep)):
+        if hasattr(step, "table_name") and step.table_name:
+            return ("table", str(step.table_name))
+        if getattr(step, "table", None):
+            return ("table", str(step.table.name))
+    return ("step", f"step_{index}")
 
 
 def _dialect_for_engine(engine: Engine) -> Dialect:
@@ -29,19 +70,52 @@ def _dialect_for_engine(engine: Engine) -> Dialect:
     raise ValueError(f"Unsupported dialect: {name}. Supported: sqlite.")
 
 
-def _apply_plan(connection: Connection, plan: SyncPlan) -> None:
+def _apply_plan(
+    connection: Connection,
+    plan: SyncPlan,
+    *,
+    commit_per_step: bool = False,
+    log_file: str | None = None,
+) -> SyncError | None:
     """
-    Execute all DDL and data-operation statements in the plan in one transaction.
+    Execute all DDL and data-operation statements in the plan.
 
-    On any failure, the transaction is rolled back (all-or-nothing per
-    docs/requirements/01-functional.md — Transaction behavior).
+    When commit_per_step is False (default), runs in one transaction; on failure
+    the transaction is rolled back (01-functional: Transaction behavior).
+    When commit_per_step is True, commits after each step.
+    On any failure returns SyncError with target_objects set to the step that failed.
     """
     statements = plan.statements()
     if not statements:
-        return
-    with connection.begin():
-        for sql in statements:
+        return None
+    steps_with_sql = [s for s in plan.steps if s.sql and s.sql.strip()]
+
+    def run_step(i: int, sql: str) -> SyncError | None:
+        try:
             connection.execute(text(sql))
+            step = steps_with_sql[i] if i < len(steps_with_sql) else None
+            desc = step.description if step else f"step_{i}"
+            _emit_apply_log(i, desc, log_file=log_file)
+            if commit_per_step:
+                connection.commit()
+            return None
+        except Exception as e:
+            step = steps_with_sql[i] if i < len(steps_with_sql) else None
+            target = _step_target(step, i) if step else ("step", f"step_{i}")
+            return SyncError(target_objects=[target], messages=[str(e)])
+
+    if commit_per_step:
+        for i, sql in enumerate(statements):
+            err = run_step(i, sql)
+            if err is not None:
+                return err
+        return None
+    with connection.begin():
+        for i, sql in enumerate(statements):
+            err = run_step(i, sql)
+            if err is not None:
+                return err
+    return None
 
 
 class ModelSync:
@@ -89,6 +163,7 @@ class ModelSync:
         *,
         allow_drop_table: bool = False,
         allow_drop_column: bool = False,
+        allow_drop_constraint: bool = True,
         allow_shrink_column: bool = False,
         report_extra_tables: bool = True,
     ) -> SyncPlan | SyncError:
@@ -111,13 +186,14 @@ class ModelSync:
                 dialect,
                 allow_drop_table=allow_drop_table,
                 allow_drop_column=allow_drop_column,
+                allow_drop_constraint=allow_drop_constraint,
                 allow_shrink_column=allow_shrink_column,
                 report_extra_tables=report_extra_tables,
             )
             return builder.build(diff)
         except Exception as e:
             return SyncError(
-                target_objects=[],
+                target_objects=[("compare", "schema")],
                 messages=[str(e)],
             )
 
@@ -127,6 +203,7 @@ class ModelSync:
         *,
         allow_drop_table: bool = False,
         allow_drop_column: bool = False,
+        allow_drop_constraint: bool = True,
         allow_shrink_column: bool = False,
         report_extra_tables: bool = True,
     ) -> SyncPlan | SyncError:
@@ -144,6 +221,7 @@ class ModelSync:
                 models,
                 allow_drop_table=allow_drop_table,
                 allow_drop_column=allow_drop_column,
+                allow_drop_constraint=allow_drop_constraint,
                 allow_shrink_column=allow_shrink_column,
                 report_extra_tables=report_extra_tables,
             )
@@ -159,16 +237,21 @@ class ModelSync:
         *,
         allow_drop_table: bool = False,
         allow_drop_column: bool = False,
+        allow_drop_constraint: bool = True,
         allow_shrink_column: bool = False,
         report_extra_tables: bool = True,
+        commit_per_step: bool = False,
+        log_file: str | None = None,
     ) -> SyncPlan | SyncError:
         """
         Compare models to the database and apply the resulting plan (run DDL and data ops).
 
         Same comparison options as compare(). On success, returns the SyncPlan that was
-        applied. On comparison or apply failure, returns SyncError; apply uses a single
-        transaction (all-or-nothing rollback on failure). See docs/requirements/01-functional.md
-        (Sync flow, Transaction behavior).
+        applied. On comparison or apply failure, returns SyncError. By default apply uses
+        a single transaction (all-or-nothing rollback on failure); set commit_per_step=True
+        to commit after each step (01-functional: Transaction behavior).
+        Applied steps are logged as JSON lines to stdout (02-non-functional: Observability);
+        pass log_file to also append to a file. No secrets are written to logs.
         """
         conn = None
         try:
@@ -178,18 +261,29 @@ class ModelSync:
                 models,
                 allow_drop_table=allow_drop_table,
                 allow_drop_column=allow_drop_column,
+                allow_drop_constraint=allow_drop_constraint,
                 allow_shrink_column=allow_shrink_column,
                 report_extra_tables=report_extra_tables,
             )
             if isinstance(plan_or_error, SyncError):
                 return plan_or_error
             plan = plan_or_error
-            conn.commit()
-            _apply_plan(conn, plan)
+            if not commit_per_step:
+                conn.commit()
+            apply_err = _apply_plan(
+                conn,
+                plan,
+                commit_per_step=commit_per_step,
+                log_file=log_file,
+            )
+            if apply_err is not None:
+                return apply_err
+            if commit_per_step:
+                conn.commit()
             return plan
         except Exception as e:
             return SyncError(
-                target_objects=[],
+                target_objects=[("connection", "sync")],
                 messages=[str(e)],
             )
         finally:

@@ -15,6 +15,7 @@ from modelsync.plan.steps import (
     AlterTableStep,
     CreateIndexStep,
     CreateTableStep,
+    DropTableStep,
     SyncPlan,
     SyncStep,
 )
@@ -74,12 +75,14 @@ class SyncPlanBuilder:
         *,
         allow_drop_table: bool = False,
         allow_drop_column: bool = False,
+        allow_drop_constraint: bool = True,
         allow_shrink_column: bool = False,
         report_extra_tables: bool = True,
     ) -> None:
         self.dialect = dialect
         self.allow_drop_table = allow_drop_table
         self.allow_drop_column = allow_drop_column
+        self.allow_drop_constraint = allow_drop_constraint
         self.allow_shrink_column = allow_shrink_column
         self.report_extra_tables = report_extra_tables
 
@@ -90,6 +93,23 @@ class SyncPlanBuilder:
 
         if self.report_extra_tables:
             extra_tables = list(diff.removed_tables.keys())
+
+        # Drop tables first (dependents before refs): reverse of create order.
+        if self.allow_drop_table and diff.removed_tables:
+            drop_order = list(
+                reversed(_topological_table_order(diff.removed_tables))
+            )
+            for name in drop_order:
+                if name not in diff.removed_tables:
+                    continue
+                sql = self.dialect.drop_table_sql(name)
+                steps.append(
+                    DropTableStep(
+                        description=f"Drop table {name}",
+                        sql=sql,
+                        table_name=name,
+                    )
+                )
 
         order = _topological_table_order(diff.added_tables)
         for name in order:
@@ -106,6 +126,47 @@ class SyncPlanBuilder:
             )
 
         for name, table_diff in diff.modified_tables.items():
+            if self.allow_drop_constraint:
+                for idx in table_diff.removed_indexes:
+                    sql = self.dialect.drop_index_sql(idx.name, name)
+                    steps.append(
+                        AlterTableStep(
+                            description=f"Drop index {idx.name} on {name}",
+                            sql=sql,
+                            table_name=name,
+                        )
+                    )
+                for u in table_diff.removed_unique:
+                    drop_sql = self.dialect.drop_unique_sql(name, u)
+                    if drop_sql:
+                        steps.append(
+                            AlterTableStep(
+                                description=f"Drop unique constraint on {name}",
+                                sql=drop_sql,
+                                table_name=name,
+                                unique=u,
+                            )
+                        )
+                for fk in table_diff.removed_foreign_keys:
+                    drop_sql = self.dialect.drop_foreign_key_sql(name, fk)
+                    if drop_sql:
+                        steps.append(
+                            AlterTableStep(
+                                description=f"Drop foreign key on {name}",
+                                sql=drop_sql,
+                                table_name=name,
+                            )
+                        )
+                for ck in table_diff.removed_checks:
+                    drop_sql = self.dialect.drop_check_sql(name, ck)
+                    if drop_sql:
+                        steps.append(
+                            AlterTableStep(
+                                description=f"Drop check constraint on {name}",
+                                sql=drop_sql,
+                                table_name=name,
+                            )
+                        )
             if self.allow_drop_column:
                 for col in table_diff.removed_columns:
                     drop_sql = self.dialect.drop_column_sql(name, col.name)

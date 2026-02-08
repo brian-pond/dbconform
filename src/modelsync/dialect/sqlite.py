@@ -11,9 +11,12 @@ import re
 
 from modelsync.dialect.base import Dialect
 from modelsync.schema.objects import (
+    CheckDef,
     ColumnDef,
+    ForeignKeyDef,
     QualifiedName,
     TableDef,
+    UniqueDef,
 )
 
 
@@ -128,3 +131,31 @@ class SQLiteDialect(Dialect):
             f"ALTER TABLE {self.qualified_table(table_name)} "
             f'DROP COLUMN {self._quote(column_name)}'
         )
+
+    def drop_table_sql(self, table_name: QualifiedName) -> str:
+        """Generate DROP TABLE for SQLite."""
+        return f"DROP TABLE IF EXISTS {self.qualified_table(table_name)}"
+
+    def drop_unique_sql(
+        self,
+        _table_name: QualifiedName,
+        _unique: UniqueDef,
+    ) -> str | None:
+        """SQLite does not support DROP CONSTRAINT for unique."""
+        return None
+
+    def drop_foreign_key_sql(
+        self,
+        _table_name: QualifiedName,
+        _fk: ForeignKeyDef,
+    ) -> str | None:
+        """SQLite does not support DROP CONSTRAINT for foreign key."""
+        return None
+
+    def drop_check_sql(
+        self,
+        _table_name: QualifiedName,
+        _check: CheckDef,
+    ) -> str | None:
+        """SQLite does not support DROP CONSTRAINT for check."""
+        return None
