@@ -5,18 +5,16 @@ Traceability: docs/requirements/01-functional.md — Schema parity, add/alter on
 Pattern: create table(s), compare, assert plan, do_sync or no-op, recompare, assert.
 """
 
-from pathlib import Path
-
 from sqlalchemy import create_engine, text
 
 import modelsync
 from tests.shared_models import OtherTable, SimpleTable
 
 
-def test_table_missing_do_sync_then_parity(empty_sqlite_db: tuple[Path, str]) -> None:
+def test_table_missing_do_sync_then_parity(empty_db: tuple[str, str | None]) -> None:
     """Table does not exist. Plan CREATE TABLE; do_sync applies; recompare 0 steps."""
-    _path, url = empty_sqlite_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
+    url, target_schema = empty_db
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
     plan_or_err = sync.compare(SimpleTable)
     assert not isinstance(plan_or_err, modelsync.SyncError), str(plan_or_err)
     assert len(plan_or_err.steps) == 1
@@ -31,22 +29,11 @@ def test_table_missing_do_sync_then_parity(empty_sqlite_db: tuple[Path, str]) ->
     assert len(recompare.steps) == 0
 
 
-def test_table_exists_identical_schema_no_steps(empty_sqlite_db: tuple[Path, str]) -> None:
+def test_table_exists_identical_schema_no_steps(empty_db: tuple[str, str | None]) -> None:
     """Scenario 2: Table exists, identical schema. 0 steps; do_sync no-op; recompare 0 steps."""
-    _path, url = empty_sqlite_db
-    engine = create_engine(url)
-    with engine.connect() as conn:
-        conn.execute(
-            text(
-                "CREATE TABLE simple_table ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255) NOT NULL, "
-                "value FLOAT NOT NULL, count INTEGER NOT NULL)"
-            )
-        )
-        conn.commit()
-    engine.dispose()
-
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
+    url, target_schema = empty_db
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
+    sync.do_sync(SimpleTable)
     plan_or_err = sync.compare(SimpleTable)
     assert not isinstance(plan_or_err, modelsync.SyncError)
     assert len(plan_or_err.steps) == 0
@@ -58,17 +45,17 @@ def test_table_exists_identical_schema_no_steps(empty_sqlite_db: tuple[Path, str
 
 
 def test_extra_table_reported_no_drop_recompare_still_extra(
-    empty_sqlite_db: tuple[Path, str],
+    empty_db: tuple[str, str | None],
 ) -> None:
     """Extra table in DB. extra_tables reported; no DROP; recompare still has extra."""
-    _path, url = empty_sqlite_db
+    url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
         conn.execute(text("CREATE TABLE other_table (id INTEGER PRIMARY KEY)"))
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
     plan_or_err = sync.compare(SimpleTable)
     assert not isinstance(plan_or_err, modelsync.SyncError)
     assert len(plan_or_err.extra_tables) == 1
@@ -82,17 +69,17 @@ def test_extra_table_reported_no_drop_recompare_still_extra(
 
 
 def test_extra_table_dropped_when_allow_drop_table(
-    empty_sqlite_db: tuple[Path, str],
+    empty_db: tuple[str, str | None],
 ) -> None:
     """Extra table in DB; compare(allow_drop_table=True) has DROP; do_sync drops it; recompare 0 extra (01-functional: Opt-in flags)."""
-    _path, url = empty_sqlite_db
+    url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
         conn.execute(text("CREATE TABLE other_table (id INTEGER PRIMARY KEY)"))
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
     plan_or_err = sync.compare(SimpleTable, allow_drop_table=True)
     assert not isinstance(plan_or_err, modelsync.SyncError)
     # Plan: DROP TABLE other_table (extra) + CREATE TABLE simple_table (missing)
@@ -110,23 +97,12 @@ def test_extra_table_dropped_when_allow_drop_table(
 
 
 def test_two_tables_one_missing_do_sync_both_present(
-    empty_sqlite_db: tuple[Path, str],
+    empty_db: tuple[str, str | None],
 ) -> None:
     """Two tables in model; one missing. Plan CREATE missing; do_sync; recompare 0 steps."""
-    _path, url = empty_sqlite_db
-    engine = create_engine(url)
-    with engine.connect() as conn:
-        conn.execute(
-            text(
-                "CREATE TABLE simple_table ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(255) NOT NULL, "
-                "value FLOAT NOT NULL, count INTEGER NOT NULL)"
-            )
-        )
-        conn.commit()
-    engine.dispose()
-
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
+    url, target_schema = empty_db
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
+    sync.do_sync(SimpleTable)
     plan_or_err = sync.compare([SimpleTable, OtherTable])
     assert not isinstance(plan_or_err, modelsync.SyncError)
     assert len(plan_or_err.steps) == 1

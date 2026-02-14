@@ -22,6 +22,7 @@
 
 ### CLI scope
 - In Phase 1, the **CLI is primarily for running tests** (and possibly that alone). The main use of modelsync is as a library: callers import it and invoke the API with their models and connection/credentials.
+- **Test CLI** (`modelsync test`): Commands for the test workflow so users avoid raw `pytest` and get clear feedback when Postgres is unavailable. `modelsync test check-container` verifies Docker/Podman and the Postgres image (create, start, stop, remove a short-lived container); exit 1 with a clear message on failure (runtime not found, image pull failed, container start failed). `modelsync test postgres up` starts a long-lived Postgres container (name `modelsync-postgres`, port 5433) and prints `MODELSYNC_TEST_POSTGRES_URL` to set; `modelsync test postgres down` stops and removes it. `modelsync test run` runs the test suite (pytest); exit 0 if all pass, 1 on test failure, **2** when tests were skipped because Postgres was not available (with a message to run check-container and postgres up, set URL, then run again). Container runtime is chosen via `MODELSYNC_CONTAINER_CMD` (docker/podman) or auto-detection.
 - **Suggestion**: A minimal sync CLI (e.g. one command that accepts a model module and DB URL and runs compare/sync) could be added later for ad-hoc runs or CI without writing Python; this is optional and not required for Phase 1.
 
 ### Sync flow and confirmation

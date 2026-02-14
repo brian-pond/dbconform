@@ -6,7 +6,12 @@ Library API: ModelSync(connection=... | credentials=..., target_schema=...),
 sync.compare(models) -> SyncPlan | SyncError.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("modelsync")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 
 from modelsync.errors import SyncError
 from modelsync.plan.steps import SyncPlan

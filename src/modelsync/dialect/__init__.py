@@ -6,9 +6,11 @@ docs/technical/02-architecture.md.
 """
 
 from modelsync.dialect.base import Dialect
+from modelsync.dialect.postgresql import PostgreSQLDialect
 from modelsync.dialect.sqlite import SQLiteDialect
 
 __all__ = [
     "Dialect",
+    "PostgreSQLDialect",
     "SQLiteDialect",
 ]

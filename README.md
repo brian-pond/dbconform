@@ -17,6 +17,14 @@ source .venv/bin/activate   # Linux/macOS
 pip install -e ".[dev]"
 ```
 
+## Installing in other projects
+
+To use modelsync in another Python application:
+
+- **Development (same machine):** From your other project, run `pip install -e /path/to/modelsync` or `uv pip install -e /path/to/modelsync`. Changes in the modelsync repo are reflected immediately.
+- **Built wheel:** From the modelsync repo run `uv build` (requires `uv` and dev deps: `pip install -e ".[dev]"`). This produces a wheel in `dist/` (e.g. `dist/modelsync-0.1.0-py3-none-any.whl`). In your other project: `pip install /path/to/modelsync/dist/modelsync-0.1.0-py3-none-any.whl`.
+- **Private index:** Upload the contents of `dist/` to your index; then `pip install modelsync --index-url https://your-index/simple/`.
+
 ## Running tests
 
 From the project root, with the virtual environment activated:

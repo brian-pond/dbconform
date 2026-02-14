@@ -5,13 +5,53 @@ Tests are split by kind:
 | Directory | Purpose |
 |-----------|--------|
 | **`unit/`** | Unit tests: no real database. They use mocks, in-memory structures, or the dialect/plan/schema logic only. Fast and isolated. |
-| **`integration/`** | Integration tests: use a real SQLite database (via the `empty_sqlite_db` fixture). They exercise ModelSync against actual tables. |
+| **`integration/`** | Integration tests: use a real database via `empty_sqlite_db` (SQLite) or `empty_db` (parametrized: SQLite + PostgreSQL). They exercise ModelSync against actual tables. |
 
 ## Running tests
+
+**Recommended:** Use the **modelsync test CLI** so you get clear feedback when Postgres is unavailable (exit code 2 and a message) instead of silent skips:
+
+- **Run all tests:** `modelsync test run` — exit 0 (pass), 1 (test failure), or 2 (Postgres not available; run `modelsync test check-container`, then `modelsync test postgres up`, set `MODELSYNC_TEST_POSTGRES_URL` as printed, then run again).
+- **Verify Docker/Podman and image:** `modelsync test check-container` — creates and removes a short-lived Postgres container; exit 1 with a clear reason if runtime or image fails.
+- **Start Postgres for tests:** `modelsync test postgres up` — prints the URL to set; then `modelsync test run`.
+- **Stop Postgres:** `modelsync test postgres down`.
+
+Set `MODELSYNC_CONTAINER_CMD=docker` or `podman` if the binary is not on PATH. Install the dev extra for the CLI: `uv sync --extra dev` (or `pip install -e ".[dev]"`).
+
+**Direct pytest** (alternative):
 
 - **All:** `pytest tests/`
 - **Unit only:** `pytest tests/unit/`
 - **Integration only:** `pytest tests/integration/`
+- **PostgreSQL integration tests** require the optional `postgres` extra: `uv sync --all-extras` or `pip install -e ".[postgres]"`. You still run **`pytest`** (not a separate “pytest-docker” command). Then either:
+  - Set **`MODELSYNC_TEST_POSTGRES_URL`** (e.g. `postgresql://user:pass@host:5432/postgres`) for an existing server, or
+  - Rely on **pytest-docker** (the plugin): with Docker running and the extra installed, `pytest tests/integration/` will automatically start the Postgres container from `tests/docker-compose.yml` when a test needs it. **Podman users:** set `MODELSYNC_TEST_POSTGRES_COMPOSE_CMD='podman compose'` or `'podman-compose'`. For `podman-compose`, the test conftest omits `--wait` (not supported) and waits for Postgres to be ready in the fixture. If neither env URL nor Docker/Podman is available, the Postgres runs are skipped.
+
+## Troubleshooting PostgreSQL skips
+
+If you see many tests **skipped** (e.g. 22), those are the `[postgres]` parametrized runs. To see why they were skipped:
+
+1. **Show skip reasons:**  
+   `pytest tests/integration/ -v -rs`  
+   The `-rs` option prints a skip summary at the end; each line includes the skip message. The message now includes **Reason: ...** with the underlying error (e.g. fixture not found, Docker/compose error). Running a single Postgres test is often clearer:  
+   `pytest tests/integration/test_compare_simple_model.py::test_compare_empty_db_returns_create_step[postgres] -v`  
+   You’ll see either the real failure (traceback) or a skip with the reason.
+
+2. **Enable Postgres with an env URL (no Docker):**  
+   - Start a PostgreSQL instance (local install, cloud, or `docker run -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16`).  
+   - Export the URL (use the `postgres` database for the fixture to create/drop test DBs):  
+     `export MODELSYNC_TEST_POSTGRES_URL="postgresql://postgres:postgres@localhost:5432/postgres"`  
+   - Run tests again; the `[postgres]` runs should execute.
+
+3. **Enable Postgres with pytest-docker (no env URL needed):**  
+   - Install the extra: `uv sync --all-extras` (or `pip install -e ".[postgres]"`). That installs the **pytest-docker** plugin; you still run `pytest` as usual.  
+   - Ensure **Docker** (or **Podman**) is running. For Podman, set  
+     `export MODELSYNC_TEST_POSTGRES_COMPOSE_CMD='podman compose'`  
+     (or `podman-compose` if you use the standalone compose script). The fixture is overridden in `tests/conftest.py`.  
+   - Run from the **project root**: `pytest tests/integration/`. The plugin will start the Postgres container from `tests/docker-compose.yml` when a test needs `empty_postgres_db`.  
+   - If the fixture still skips, run a single test and check the traceback:  
+     `pytest tests/integration/test_compare_simple_model.py::test_compare_empty_db_returns_create_step[postgres] -v`  
+     You may see a missing fixture (`docker_services` / `docker_ip`) or a Docker/Compose error.
 
 ## Shared test data
 
@@ -19,7 +59,7 @@ Tests are split by kind:
 
 ## Fixtures
 
-- **`integration/conftest.py`** — Defines `empty_sqlite_db`: a fresh SQLite file under `tmp_path` per test. See `docs/technical/01-test-database.md` for strategy.
+- **`integration/conftest.py`** — Defines `empty_sqlite_db` (fresh SQLite file per test under `tmp_path`), `empty_postgres_db` (PostgreSQL: env URL or pytest-docker, per-test DB), and `empty_db` (parametrized over sqlite/postgres for identical tests). See `docs/technical/01-test-database.md` for strategy.
 
 ## Additional test ideas (not yet implemented)
 

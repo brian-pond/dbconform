@@ -8,15 +8,27 @@ version = "0.1.0"
 description = "Synchronize database models with actuals — document-driven project."
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Project maintainers" }]
 dependencies = [
     "sqlalchemy>=2.0",
+]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Private :: Do Not Distribute",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "build",
     "pytest",
     "ruff",
     "sqlmodel",
+    "typer>=0.9",
+]
+postgres = [
+    "psycopg[binary]>=3",
+    "pytest-docker>=2",
 ]
 
 [tool.ruff]
@@ -32,3 +44,4 @@ ignore = []
 where = ["src"]
 
 [project.scripts]
+modelsync = "modelsync.cli:main"

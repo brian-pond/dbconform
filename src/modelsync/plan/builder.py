@@ -119,7 +119,7 @@ class SyncPlanBuilder:
             sql = self.dialect.create_table_sql(table)
             steps.append(
                 CreateTableStep(
-                    description=f"Create table {name}",
+                    description=f"Need to Create table '{name}'",
                     sql=sql,
                     table=table,
                 )

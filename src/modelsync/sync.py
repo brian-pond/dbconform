@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
-from modelsync.dialect import Dialect, SQLiteDialect
+from modelsync.dialect import Dialect, PostgreSQLDialect, SQLiteDialect
 from modelsync.errors import SyncError
 from modelsync.plan import SyncPlan, SyncPlanBuilder
 from modelsync.plan.steps import (
@@ -67,7 +67,9 @@ def _dialect_for_engine(engine: Engine) -> Dialect:
     name = engine.dialect.name
     if name == "sqlite":
         return SQLiteDialect()
-    raise ValueError(f"Unsupported dialect: {name}. Supported: sqlite.")
+    if name == "postgresql":
+        return PostgreSQLDialect()
+    raise ValueError(f"Unsupported dialect: {name}. Supported: sqlite, postgresql.")
 
 
 def _apply_plan(
@@ -92,7 +94,8 @@ def _apply_plan(
 
     def run_step(i: int, sql: str) -> SyncError | None:
         try:
-            connection.execute(text(sql))
+            for part in (p.strip() for p in sql.split(";") if p.strip()):
+                connection.execute(text(part))
             step = steps_with_sql[i] if i < len(steps_with_sql) else None
             desc = step.description if step else f"step_{i}"
             _emit_apply_log(i, desc, log_file=log_file)

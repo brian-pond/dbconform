@@ -6,6 +6,8 @@ All notable changes to the requirements docs are documented here.
 
 ### Added
 
+- **Test CLI**: `modelsync test` with subcommands `check-container`, `postgres up`, `postgres down`, and `run`. Verifies Docker/Podman and Postgres image; starts/stops a long-lived Postgres container (port 5433); runs pytest with exit code 2 when Postgres was unavailable (clear message and remediation). See 01-functional (CLI scope) and docs/technical/01-test-database.md.
+- **PostgreSQL support**: New `PostgreSQLDialect` (DDL for create/alter/drop; schema-qualified identifiers). ModelSync accepts `postgresql` engines; target_schema required. Integration tests run identically against SQLite and PostgreSQL via parametrized `empty_db` fixture; PostgreSQL uses `MODELSYNC_TEST_POSTGRES_URL` or pytest-docker (see docs/technical/01-test-database.md). Optional extra `postgres` (psycopg, pytest-docker).
 - **01-functional / API**: ModelSync.do_sync(models) — compare then apply the plan in a single transaction; returns SyncPlan on success or SyncError on failure. compare() remains the dry-run entry point.
 - **allow_drop_table**: compare() and do_sync() accept allow_drop_table=False; when True, plan may include DROP TABLE steps for tables in DB but not in model. DropTableStep and Dialect.drop_table_sql() added.
 - **allow_drop_column**: compare() and do_sync() accept allow_drop_column=False; when True, plan may include DROP COLUMN steps for columns in DB but not in model. Dialect.drop_column_sql() added (SQLite 3.35+).

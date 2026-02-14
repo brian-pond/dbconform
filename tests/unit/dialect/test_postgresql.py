@@ -1,0 +1,81 @@
+"""
+Unit tests for PostgreSQLDialect DDL output.
+
+Traceability: docs/requirements/01-functional.md (Schema parity, Identifiers and quoting).
+"""
+
+from modelsync.dialect.postgresql import PostgreSQLDialect
+from modelsync.schema.objects import (
+    ColumnDef,
+    QualifiedName,
+    PrimaryKeyDef,
+    TableDef,
+    UniqueDef,
+)
+
+
+def test_postgresql_quote_identifier() -> None:
+    """PostgreSQL uses double-quoted identifiers."""
+    dialect = PostgreSQLDialect()
+    assert dialect._quote("foo") == '"foo"'
+    assert dialect.qualified_table(QualifiedName(None, "t")) == '"t"'
+    assert dialect.qualified_table(QualifiedName("public", "t")) == '"public"."t"'
+
+
+def test_postgresql_create_table_serial_pk() -> None:
+    """Single autoincrement PK column becomes SERIAL PRIMARY KEY."""
+    dialect = PostgreSQLDialect()
+    table = TableDef(
+        name=QualifiedName("public", "foo"),
+        columns=(
+            ColumnDef("id", "INTEGER", nullable=False, autoincrement=True),
+            ColumnDef("name", "VARCHAR(255)", nullable=False),
+        ),
+        primary_key=PrimaryKeyDef(("id",)),
+    )
+    sql = dialect.create_table_sql(table)
+    assert "SERIAL" in sql
+    assert "PRIMARY KEY" in sql
+    assert '"public"."foo"' in sql
+    assert "VARCHAR(255)" in sql
+
+
+def test_postgresql_alter_column_sql() -> None:
+    """PostgreSQL emits ALTER COLUMN for type and nullability."""
+    dialect = PostgreSQLDialect()
+    tbl = QualifiedName("public", "t")
+    old_col = ColumnDef("x", "INTEGER", nullable=True)
+    new_col = ColumnDef("x", "BIGINT", nullable=False)
+    sql = dialect.alter_column_sql(tbl, old_col, new_col)
+    assert sql is not None
+    assert "ALTER COLUMN" in sql
+    assert "TYPE BIGINT" in sql
+    assert "SET NOT NULL" in sql
+
+
+def test_postgresql_drop_index_schema_qualified() -> None:
+    """PostgreSQL DROP INDEX can be schema-qualified."""
+    dialect = PostgreSQLDialect()
+    sql = dialect.drop_index_sql("idx_foo", QualifiedName("public", "t"))
+    assert "DROP INDEX" in sql
+    assert '"public"."idx_foo"' in sql
+
+
+def test_postgresql_drop_unique_sql() -> None:
+    """PostgreSQL supports DROP CONSTRAINT for unique."""
+    dialect = PostgreSQLDialect()
+    tbl = QualifiedName(None, "t")
+    u = UniqueDef("uq_name", ("col",))
+    sql = dialect.drop_unique_sql(tbl, u)
+    assert sql is not None
+    assert "DROP CONSTRAINT" in sql
+    assert '"uq_name"' in sql
+
+
+def test_postgresql_would_shrink() -> None:
+    """PostgreSQL dialect would_shrink for VARCHAR length."""
+    dialect = PostgreSQLDialect()
+    old_500 = ColumnDef("name", "VARCHAR(500)", nullable=False)
+    new_255 = ColumnDef("name", "VARCHAR(255)", nullable=False)
+    assert dialect.would_shrink(old_500, new_255) is True
+    assert dialect.would_shrink(new_255, old_500) is False
