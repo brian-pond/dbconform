@@ -4,7 +4,7 @@ Unit tests for PostgreSQLDialect DDL output.
 Traceability: docs/requirements/01-functional.md (Schema parity, Identifiers and quoting).
 """
 
-from modelsync.dialect.postgresql import PostgreSQLDialect
+from modelsync.sql_dialect.postgresql import PostgreSQLDialect
 from modelsync.schema.objects import (
     ColumnDef,
     PrimaryKeyDef,
@@ -91,15 +91,15 @@ def test_postgresql_parse_varchar_length() -> None:
     assert dialect._parse_varchar_length("VARCHAR( 500 )") == 500
 
 
-def test_postgresql_to_canonical_type_expr() -> None:
-    """PostgreSQL to_canonical_type_expr normalizes reflected type strings."""
+def test_postgresql_to_neutral_type() -> None:
+    """PostgreSQL to_neutral_type normalizes reflected type strings."""
     dialect = PostgreSQLDialect()
-    assert dialect.to_canonical_type_expr("DOUBLE PRECISION") == "FLOAT"
-    assert dialect.to_canonical_type_expr("REAL") == "FLOAT"
-    assert dialect.to_canonical_type_expr("CHARACTER VARYING(255)") == "VARCHAR(255)"
-    assert dialect.to_canonical_type_expr("varchar(100)") == "VARCHAR(100)"
-    assert dialect.to_canonical_type_expr("INTEGER") == "INTEGER"
-    assert dialect.to_canonical_type_expr("VARCHAR  ( 50 )") == "VARCHAR(50)"
+    assert dialect.to_neutral_type("DOUBLE PRECISION") == "FLOAT"
+    assert dialect.to_neutral_type("REAL") == "FLOAT"
+    assert dialect.to_neutral_type("CHARACTER VARYING(255)") == "VARCHAR(255)"
+    assert dialect.to_neutral_type("varchar(100)") == "VARCHAR(100)"
+    assert dialect.to_neutral_type("INTEGER") == "INTEGER"
+    assert dialect.to_neutral_type("VARCHAR  ( 50 )") == "VARCHAR(50)"
 
 
 def test_postgresql_to_ddl_type_serial() -> None:
@@ -114,7 +114,7 @@ def test_postgresql_to_ddl_type_serial() -> None:
 
 
 def test_postgresql_to_ddl_type_plain() -> None:
-    """PostgreSQL to_ddl_type returns type_expr when not SERIAL."""
+    """PostgreSQL to_ddl_type returns data_type_name when not SERIAL."""
     dialect = PostgreSQLDialect()
     col = ColumnDef("name", "VARCHAR(255)", nullable=False)
     assert dialect.to_ddl_type(col) == "VARCHAR(255)"

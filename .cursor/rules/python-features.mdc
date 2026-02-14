@@ -1,0 +1,15 @@
+---
+description: Prefer modern Python features when they improve clarity or correctness
+alwaysApply: true
+---
+
+# Modern Python (3.11+)
+
+Use these features **tactically** when they make code clearer or more correct. Do not force them where they add no benefit.
+
+- **dataclasses** — Prefer `@dataclass` (and `frozen=True` where immutability helps) for data-carrying types. Consider `slots=True` for such dataclasses to reduce memory and lock attributes (Python 3.10+).
+- **Assignment expressions (walrus `:=`)** — Use when a value is needed in both a condition and the body (e.g. `while (line := f.readline()):`) to avoid duplication; avoid when it hurts readability.
+- **typing** — Use type hints everywhere (already required). Prefer modern typing: `list[str]`, `X | None`, and `typing.Self` for methods that return `self` (e.g. `def __enter__(self) -> Self:`).
+- **str.removeprefix() / str.removesuffix()** — Prefer these over `s[len(prefix):]` or `s[:-len(suffix)] if s.endswith(suffix)` when stripping a known prefix or suffix.
+- **Structural pattern matching (`match` / `case`)** — Use for multi-branch dispatch on types or literals when it is clearer than long `if`/`elif` chains; keep cases simple.
+- **BaseException.add_note()** — When raising or re-raising, consider `e.add_note("...")` to attach context that appears in the traceback (Python 3.11+).

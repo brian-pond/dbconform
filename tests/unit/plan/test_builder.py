@@ -9,7 +9,7 @@ control destructive steps.
 
 from collections import OrderedDict
 
-from modelsync.dialect.sqlite import SQLiteDialect
+from modelsync.sql_dialect.sqlite import SQLiteDialect
 from modelsync.plan.builder import SyncPlanBuilder
 from modelsync.plan.steps import DropTableStep, SyncPlan
 from modelsync.schema.diff import DiffResult, TableDiff

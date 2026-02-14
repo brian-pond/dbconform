@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 
-from modelsync.schema.objects import (
+from modelsync.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -194,37 +194,37 @@ class Dialect(ABC):
         """Generate DROP INDEX."""
         return f"DROP INDEX IF EXISTS {self._quote(index_name)}"
 
-    def to_canonical_type_expr(self, type_expr: str) -> str:
+    def to_neutral_type(self, reflected_type: str) -> str:
         """
-        Map a platform or SQLAlchemy-compiled type string to canonical form.
+        Map a platform or SQLAlchemy-compiled type string to neutral form.
 
         Default: return unchanged. Override in backends that need normalization
         (e.g. PostgreSQL: DOUBLE PRECISION → FLOAT, CHARACTER VARYING(n) → VARCHAR(n)).
         """
-        return type_expr
+        return reflected_type
 
     def to_ddl_type(self, column: ColumnDef, *, pk_autoincrement: bool = False) -> str:  # noqa: ARG002
         """
         Return the platform-specific DDL type string for a column.
 
-        Default: return column.type_expr. Override for backends that use
+        Default: return column.data_type_name. Override for backends that use
         different DDL (e.g. PostgreSQL: INTEGER + autoincrement PK → SERIAL).
         """
-        return column.type_expr
+        return column.data_type_name
 
-    def _parse_varchar_length(self, type_expr: str) -> int | None:
+    def _parse_varchar_length(self, data_type_name: str) -> int | None:
         """
         Parse VARCHAR(n) or CHAR(n) from a type string; return n or None.
 
         Shared by dialects for would_shrink and type normalization.
         """
-        m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+        m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", data_type_name, re.IGNORECASE)
         if m:
             return int(m.group(1))
-        m = re.match(r"CHARACTER\s+VARYING\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+        m = re.match(r"CHARACTER\s+VARYING\s*\(\s*(\d+)\s*\)", data_type_name, re.IGNORECASE)
         if m:
             return int(m.group(1))
-        m = re.match(r"CHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+        m = re.match(r"CHAR\s*\(\s*(\d+)\s*\)", data_type_name, re.IGNORECASE)
         if m:
             return int(m.group(1))
         return None

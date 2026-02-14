@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import deque
 
-from modelsync.dialect.base import Dialect
+from modelsync.sql_dialect.base import Dialect
 from modelsync.plan.steps import (
     AlterTableStep,
     CreateIndexStep,
@@ -19,8 +19,8 @@ from modelsync.plan.steps import (
     SyncPlan,
     SyncStep,
 )
-from modelsync.schema.diff import DiffResult
-from modelsync.schema.objects import QualifiedName, TableDef
+from modelsync.compare.diff import DiffResult
+from modelsync.internal.objects import QualifiedName, TableDef
 
 
 def _topological_table_order(

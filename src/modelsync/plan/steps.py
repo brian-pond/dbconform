@@ -7,10 +7,11 @@ See docs/requirements/01-functional.md (Plan and DDL order).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from modelsync.schema.objects import (
+from modelsync.internal.objects import (
     ColumnDef,
     IndexDef,
     QualifiedName,
@@ -19,7 +20,7 @@ from modelsync.schema.objects import (
 )
 
 
-@dataclass
+@dataclass(slots=True)
 class SyncStep:
     """Single step in a sync plan (DDL or data op)."""
 
@@ -32,14 +33,14 @@ class SyncStep:
         return self.description
 
 
-@dataclass
+@dataclass(slots=True)
 class CreateTableStep(SyncStep):
     """Create a table (columns + table-level constraints)."""
 
     table: TableDef = field(default_factory=lambda: TableDef(name=QualifiedName(None, "")))
 
 
-@dataclass
+@dataclass(slots=True)
 class AlterTableStep(SyncStep):
     """Alter a table (add/alter column, add constraint, etc.)."""
 
@@ -50,7 +51,7 @@ class AlterTableStep(SyncStep):
     unique: UniqueDef | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class CreateIndexStep(SyncStep):
     """Create an index."""
 
@@ -60,14 +61,14 @@ class CreateIndexStep(SyncStep):
     table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
 
 
-@dataclass
+@dataclass(slots=True)
 class DropTableStep(SyncStep):
     """Drop a table. Emitted only when allow_drop_table=True (01-functional: Opt-in flags)."""
 
     table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
 
 
-@dataclass
+@dataclass(slots=True)
 class SyncPlan:
     """
     Ordered list of DDL and data-operation steps plus optional extra tables.
@@ -79,7 +80,7 @@ class SyncPlan:
     steps: list[SyncStep] = field(default_factory=list)
     extra_tables: list[QualifiedName] = field(default_factory=list)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[SyncStep]:
         return iter(self.steps)
 
     def sql(self) -> str:

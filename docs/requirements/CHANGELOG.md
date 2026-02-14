@@ -4,7 +4,14 @@ All notable changes to the requirements docs are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Package rename:** The `dialect` subpackage was renamed to `sql_dialect` for clarity (DDL generation for SQL backends). Update imports from `modelsync.dialect` to `modelsync.sql_dialect`. Unit tests moved from `tests/unit/dialect/` to `tests/unit/sql_dialect/`. See docs/technical/02-architecture.md (Package layout).
+
 ### Added
+- **Ingestion read-only contract:** Adapters (model ingestion) are documented as read-only: we do not mutate the caller's model classes or their `__table__` / columns. See adapters/model_schema.py docstring and docs/technical/02-architecture.md. A regression test (tests/unit/adapters/test_model_schema.py) asserts that ModelSchema.from_models() does not change the passed-in model's table fingerprint.
+- **Model frameworks (in-scope):** Django Models, Tortoise ORM, and Piccolo ORM added as supported model frameworks alongside SQLAlchemy and SQLModel. Support for these may be implemented via adapters that produce the same internal schema (01-functional: Model discovery and API; 00-overview: In-scope).
+- **Internal schema, neutral types, data_type_name:** Terminology and implementation updates: "canonical schema" renamed to "internal schema" across docs and code; ColumnDef attribute `type_expr` renamed to `data_type_name`; dialect method `to_canonical_type_expr` renamed to `to_neutral_type`. Design goals for internal schema (lightweight, frozen/immutable, lingua franca between ORMs and DBs) documented in docs/technical/02-architecture.md. Neutral type vocabulary (Option B) to be adopted in a follow-up: model-side schema will not depend on target dialect for type strings.
+- **Four core functions:** Documentation of the four core functions (internal schema, adapters/ingest, compare, DDL generation) added to docs/technical/02-architecture.md and referenced in docs/requirements/00-overview.md. Codebase refactored into subpackages `internal`, `adapters`, and `compare`; `schema` retained as a backward-compatibility re-export.
 
 - **Test CLI**: `modelsync test` with subcommands `check-container`, `postgres up`, `postgres down`, and `run`. Verifies Docker/Podman and Postgres image; starts/stops a long-lived Postgres container (port 5433); runs pytest with exit code 2 when Postgres was unavailable (clear message and remediation). See 01-functional (CLI scope) and docs/technical/01-test-database.md.
 - **PostgreSQL support**: New `PostgreSQLDialect` (DDL for create/alter/drop; schema-qualified identifiers). ModelSync accepts `postgresql` engines; target_schema required. Integration tests run identically against SQLite and PostgreSQL via parametrized `empty_db` fixture; PostgreSQL uses `MODELSYNC_TEST_POSTGRES_URL` (see docs/technical/01-test-database.md). Optional extra `postgres` (psycopg).

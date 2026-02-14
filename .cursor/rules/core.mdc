@@ -58,7 +58,7 @@ Every function must include:
 - Tests should not alter persistent data; use temporary or mock data.
 
 ## Running tests
-- This project uses **uv** for dependency and environment management. Run tests with **`uv run pytest`** (e.g. `uv run pytest tests/` or `uv run pytest path/to/test_file.py`). Do not try `python` or `python3 -m pytest` first; use `uv run pytest` so the correct environment is used without trial-and-error.
+- When running tests, use the project test CLI: see [.cursor/rules/tests.mdc](.cursor/rules/tests.mdc). This project uses **uv** for dependency and environment management.
 
 ## Target Platform
 - Application's target platform for deployment is Linux.

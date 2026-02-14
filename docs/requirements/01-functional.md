@@ -8,7 +8,8 @@
 ## User / API flows
 
 ### Model discovery and API
-- modelsync does **not** discover or parse Python files on its own. Callers write their own models (SQLAlchemy or SQLModel) and **import modelsync** into their code, then call library APIs and pass models explicitly.
+- modelsync does **not** discover or parse Python files on its own. Callers write their own models and **import modelsync** into their code, then call library APIs and pass models explicitly.
+- **Supported model frameworks:** SQLAlchemy, SQLModel, Django Models, Tortoise ORM, Piccolo ORM. Support for frameworks other than SQLAlchemy/SQLModel may be provided via adapters that produce the same internal schema used for comparison.
 - The API must accept either a single model or a sequence of models (e.g. to functions such as `compare()` or `do_sync()`).
 
 ### Database connection

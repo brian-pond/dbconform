@@ -4,7 +4,7 @@ Tests are split by kind:
 
 | Directory | Purpose |
 |-----------|--------|
-| **`unit/`** | Unit tests: no real database. They use mocks, in-memory structures, or the dialect/plan/schema logic only. Fast and isolated. |
+| **`unit/`** | Unit tests: no real database. They use mocks, in-memory structures, or the sql_dialect/plan/schema logic only. Fast and isolated. |
 | **`integration/`** | Integration tests: use a real database via `empty_sqlite_db` (SQLite) or `empty_db` (parametrized: SQLite + PostgreSQL). They exercise ModelSync against actual tables. |
 
 ## Running tests

@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
-from modelsync.dialect import Dialect, PostgreSQLDialect, SQLiteDialect
+from modelsync.sql_dialect import Dialect, PostgreSQLDialect, SQLiteDialect
 from modelsync.errors import SyncError
 from modelsync.plan import SyncPlan, SyncPlanBuilder
 from modelsync.plan.steps import (
@@ -26,8 +26,8 @@ from modelsync.plan.steps import (
     DropTableStep,
     SyncStep,
 )
-from modelsync.schema import DatabaseSchema, ModelSchema
-from modelsync.schema.diff import SchemaDiffer
+from modelsync.adapters import ModelSchema
+from modelsync.compare import DatabaseSchema, SchemaDiffer
 
 
 def _emit_apply_log(
@@ -52,24 +52,27 @@ def _emit_apply_log(
 
 def _step_target(step: SyncStep, index: int) -> tuple[str, str]:
     """Return (object_type, identifier) for a step (01-functional: Error handling)."""
-    if isinstance(step, DropTableStep):
-        return ("table", str(step.table_name))
-    if isinstance(step, (CreateTableStep, AlterTableStep, CreateIndexStep)):
-        if hasattr(step, "table_name") and step.table_name:
+    match step:
+        case DropTableStep():
             return ("table", str(step.table_name))
-        if getattr(step, "table", None):
-            return ("table", str(step.table.name))
+        case CreateTableStep() | AlterTableStep() | CreateIndexStep():
+            if hasattr(step, "table_name") and step.table_name:
+                return ("table", str(step.table_name))
+            if getattr(step, "table", None):
+                return ("table", str(step.table.name))
     return ("step", f"step_{index}")
 
 
 def _dialect_for_engine(engine: Engine) -> Dialect:
     """Return the Dialect implementation for the engine."""
     name = engine.dialect.name
-    if name == "sqlite":
-        return SQLiteDialect()
-    if name == "postgresql":
-        return PostgreSQLDialect()
-    raise ValueError(f"Unsupported dialect: {name}. Supported: sqlite, postgresql.")
+    match name:
+        case "sqlite":
+            return SQLiteDialect()
+        case "postgresql":
+            return PostgreSQLDialect()
+        case _:
+            raise ValueError(f"Unsupported dialect: {name}. Supported: sqlite, postgresql.")
 
 
 def _apply_plan(
@@ -104,6 +107,8 @@ def _apply_plan(
             return None
         except Exception as e:
             step = steps_with_sql[i] if i < len(steps_with_sql) else None
+            desc = step.description if step else f"step_{i}"
+            e.add_note(f"Step {i}: {desc}")
             target = _step_target(step, i) if step else ("step", f"step_{i}")
             return SyncError(target_objects=[target], messages=[str(e)])
 
@@ -179,9 +184,7 @@ class ModelSync:
             dialect = self._get_dialect(connection)
             model_schema = ModelSchema.from_models(
                 models,
-                dialect=connection.dialect,
                 target_schema=self._target_schema,
-                schema_normalizer=dialect,
             )
             db_schema = DatabaseSchema.from_connection(connection, self._target_schema)
             differ = SchemaDiffer()
@@ -196,6 +199,7 @@ class ModelSync:
             )
             return builder.build(diff)
         except Exception as e:
+            e.add_note("During compare (model vs DB schema).")
             return SyncError(
                 target_objects=[("compare", "schema")],
                 messages=[str(e)],
@@ -286,6 +290,7 @@ class ModelSync:
                 conn.commit()
             return plan
         except Exception as e:
+            e.add_note("During connection or apply/sync.")
             return SyncError(
                 target_objects=[("connection", "sync")],
                 messages=[str(e)],

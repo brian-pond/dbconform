@@ -7,8 +7,8 @@ See docs/requirements/01-functional.md (Schema parity scope).
 
 from __future__ import annotations
 
-from modelsync.dialect.base import Dialect
-from modelsync.schema.objects import (
+from modelsync.sql_dialect.base import Dialect
+from modelsync.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -39,7 +39,7 @@ class SQLiteDialect(Dialect):
             )
         )
         for col in table.columns:
-            seg = f"{self._quote(col.name)} {col.type_expr}"
+            seg = f"{self._quote(col.name)} {col.data_type_name}"
             if not col.nullable:
                 seg += " NOT NULL"
             if col.default is not None:
@@ -69,7 +69,7 @@ class SQLiteDialect(Dialect):
 
     def add_column_sql(self, table_name: QualifiedName, column: ColumnDef) -> str:
         """SQLite supports ALTER TABLE ... ADD COLUMN."""
-        seg = f"{self._quote(column.name)} {column.type_expr}"
+        seg = f"{self._quote(column.name)} {column.data_type_name}"
         if not column.nullable:
             seg += " NOT NULL"
         if column.default is not None:
@@ -82,8 +82,8 @@ class SQLiteDialect(Dialect):
         new_column: ColumnDef,
     ) -> bool:
         """True if new column has a smaller length than old (VARCHAR/CHAR)."""
-        old_len = self._parse_varchar_length(old_column.type_expr)
-        new_len = self._parse_varchar_length(new_column.type_expr)
+        old_len = self._parse_varchar_length(old_column.data_type_name)
+        new_len = self._parse_varchar_length(new_column.data_type_name)
         return old_len is not None and new_len is not None and new_len < old_len
 
     def alter_column_sql(

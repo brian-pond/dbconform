@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import re
 
-from modelsync.dialect.base import Dialect
-from modelsync.schema.objects import (
+from modelsync.sql_dialect.base import Dialect
+from modelsync.internal.types import CanonicalType
+from modelsync.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -31,13 +32,13 @@ class PostgreSQLDialect(Dialect):
     def _quote(self, name: str) -> str:
         return f'"{name}"'
 
-    def to_canonical_type_expr(self, type_expr: str) -> str:
+    def to_neutral_type(self, reflected_type: str) -> str:
         """
-        Map reflected PostgreSQL type strings to canonical form.
+        Map reflected PostgreSQL type strings to neutral form.
 
         DOUBLE PRECISION, REAL → FLOAT; CHARACTER VARYING(n), varchar(n) → VARCHAR(n).
         """
-        t = " ".join(type_expr.split()).strip()
+        t = " ".join(reflected_type.split()).strip()
         u = t.upper()
         if u == "DOUBLE PRECISION" or u == "REAL":
             return "FLOAT"
@@ -50,13 +51,13 @@ class PostgreSQLDialect(Dialect):
         return t
 
     def to_ddl_type(self, column: ColumnDef, *, pk_autoincrement: bool = False) -> str:
-        """PostgreSQL: SERIAL/BIGSERIAL for autoincrement PK; else column.type_expr."""
+        """PostgreSQL: SERIAL/BIGSERIAL for autoincrement PK; else column.data_type_name."""
         if pk_autoincrement and column.autoincrement:
-            type_upper = column.type_expr.strip().upper()
+            type_upper = column.data_type_name.strip().upper()
             if type_upper in ("BIGINT", "INT8"):
                 return "BIGSERIAL"
             return "SERIAL"
-        return column.type_expr
+        return column.data_type_name
 
     def create_table_sql(self, table: TableDef) -> str:
         """Generate CREATE TABLE with columns and table-level constraints."""
@@ -114,8 +115,8 @@ class PostgreSQLDialect(Dialect):
         new_column: ColumnDef,
     ) -> bool:
         """True if new column has a smaller length than old (VARCHAR/CHAR)."""
-        old_len = self._parse_varchar_length(old_column.type_expr)
-        new_len = self._parse_varchar_length(new_column.type_expr)
+        old_len = self._parse_varchar_length(old_column.data_type_name)
+        new_len = self._parse_varchar_length(new_column.data_type_name)
         return old_len is not None and new_len is not None and new_len < old_len
 
     def alter_column_sql(
@@ -128,7 +129,7 @@ class PostgreSQLDialect(Dialect):
         tbl = self.qualified_table(table_name)
         qcol = self._quote(new_column.name)
         stmts: list[str] = []
-        if old_column.type_expr != new_column.type_expr:
+        if old_column.data_type_name != new_column.data_type_name:
             ddl_type = self.to_ddl_type(new_column)
             stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} TYPE {ddl_type}")
         if old_column.nullable != new_column.nullable:
@@ -231,7 +232,7 @@ class PostgreSQLDialect(Dialect):
         Normalize reflected table so SERIAL/sequence columns compare equal to model.
 
         Columns with a sequence default (nextval) and integer-like type are rewritten
-        to default=None, autoincrement=True, type_expr=INTEGER|BIGINT so they match
+        to default=None, autoincrement=True, data_type_name=INTEGER|BIGINT so they match
         the model's representation and no spurious ALTER steps are emitted.
         """
         INTEGER_LIKE = ("SERIAL", "INTEGER", "BIGSERIAL", "BIGINT", "INT8")
@@ -240,16 +241,18 @@ class PostgreSQLDialect(Dialect):
             if (
                 col.default is not None
                 and "nextval" in col.default
-                and col.type_expr.strip().upper() in INTEGER_LIKE
+                and col.data_type_name.strip().upper() in INTEGER_LIKE
             ):
-                type_upper = col.type_expr.strip().upper()
-                canonical_type = (
-                    "BIGINT" if type_upper in ("BIGSERIAL", "BIGINT", "INT8") else "INTEGER"
+                type_upper = col.data_type_name.strip().upper()
+                neutral_type = (
+                    CanonicalType.BIGINT
+                    if type_upper in ("BIGSERIAL", "BIGINT", "INT8")
+                    else CanonicalType.INTEGER
                 )
                 new_columns.append(
                     ColumnDef(
                         name=col.name,
-                        type_expr=canonical_type,
+                        data_type_name=neutral_type,
                         nullable=col.nullable,
                         default=None,
                         comment=col.comment,
@@ -257,12 +260,12 @@ class PostgreSQLDialect(Dialect):
                     )
                 )
             else:
-                canonical_type = self.to_canonical_type_expr(col.type_expr)
+                neutral_type = self.to_neutral_type(col.data_type_name)
                 # Non-SERIAL columns must not have autoincrement=True from reflection noise.
                 new_columns.append(
                     ColumnDef(
                         name=col.name,
-                        type_expr=canonical_type,
+                        data_type_name=neutral_type,
                         nullable=col.nullable,
                         default=col.default,
                         comment=col.comment,

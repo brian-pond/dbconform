@@ -1,14 +1,12 @@
 """
-Canonical schema representation for model-to-database comparison.
+Public schema API; re-exports from modelsync.internal, modelsync.adapters, modelsync.compare.
 
-See docs/requirements/01-functional.md (Schema parity scope) and
-docs/technical/02-architecture.md.
+See docs/technical/02-architecture.md (Package layout).
 """
 
-from modelsync.schema.db_schema import DatabaseSchema
-from modelsync.schema.diff import DiffResult, SchemaDiffer
-from modelsync.schema.model_schema import ModelSchema
-from modelsync.schema.objects import (
+from modelsync.compare import DatabaseSchema, DiffResult, SchemaDiffer, TableDiff, differences
+from modelsync.adapters import ModelSchema, sa_column_to_neutral_type
+from modelsync.internal import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -31,5 +29,8 @@ __all__ = [
     "QualifiedName",
     "SchemaDiffer",
     "TableDef",
+    "TableDiff",
     "UniqueDef",
+    "differences",
+    "sa_column_to_neutral_type",
 ]
