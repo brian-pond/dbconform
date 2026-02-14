@@ -7,16 +7,22 @@ name = "modelsync"
 version = "0.1.0"
 description = "Synchronize database models with actuals — document-driven project."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "Project maintainers" }]
+authors = [{ name = "Brian L. Pond" }]
 dependencies = [
     "sqlalchemy>=2.0",
 ]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Private :: Do Not Distribute",
 ]
+
+[project.urls]
+Homepage = "https://github.com/brian-pond/modelsync"
+Repository = "https://github.com/brian-pond/modelsync"
 
 [project.optional-dependencies]
 dev = [

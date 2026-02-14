@@ -1,6 +1,6 @@
 # modelsync
 
-Schema and model synchronization for keeping your database schema in sync with your SQLAlchemy or SQLModel definitions.
+A Python library for schema and model synchronization: keep your database schema in sync with your SQLAlchemy or SQLModel definitions.
 
 ## Prerequisites
 
