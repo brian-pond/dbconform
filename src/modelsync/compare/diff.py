@@ -1,5 +1,5 @@
 """
-Compare model schema to database schema and produce a structured diff.
+Compare model-side internal schema to database-side internal schema and produce a structured diff.
 
 Uses the same added/removed/modified pattern as migra/results (db-to-db);
 here "from" is DB and "target" is model so we drive toward the model.
@@ -114,7 +114,7 @@ class TableDiff:
 @dataclass(slots=True)
 class DiffResult:
     """
-    Result of comparing model schema (target) to database schema (current).
+    Result of comparing model-side internal schema (target) to database-side internal schema (current).
 
     - added_tables: in model, not in DB -> emit CREATE.
     - removed_tables: in DB, not in model -> do not DROP unless opt-in; report as "extra".
@@ -218,7 +218,7 @@ def _build_table_diff(old_table: TableDef, new_table: TableDef) -> TableDiff:
 
 class SchemaDiffer:
     """
-    Compares model schema (target) to database schema (current).
+    Compares model-side internal schema (target) to database-side internal schema (current).
 
     Produces DiffResult: added_tables, removed_tables, modified_tables.
     """
@@ -229,7 +229,7 @@ class SchemaDiffer:
         db_schema: Any,
     ) -> DiffResult:
         """
-        Compare model schema to database schema.
+        Compare model-side internal schema to database-side internal schema.
 
         model_schema and db_schema must have .tables: dict[QualifiedName, TableDef].
         """

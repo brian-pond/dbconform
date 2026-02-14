@@ -231,7 +231,7 @@ class Dialect(ABC):
 
     def normalize_reflected_table(self, table_def: TableDef) -> TableDef:
         """
-        Optionally normalize a reflected TableDef so it compares equal to model schema.
+        Optionally normalize a reflected TableDef so it compares equal to model-side internal schema.
 
         Default: return table_def unchanged. PostgreSQL overrides to normalize
         SERIAL/sequence columns (nextval default → default=None, autoincrement=True).

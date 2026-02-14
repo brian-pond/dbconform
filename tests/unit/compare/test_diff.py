@@ -2,15 +2,11 @@
 Unit tests for SchemaDiffer and differences().
 
 Traceability: docs/requirements/01-functional.md (Plan and DDL order);
-docs/technical/02-architecture.md. Scenarios: added, removed, modified tables.
+docs/technical/02-architecture.md (Core functions: Compare). Scenarios: added, removed, modified tables.
 """
 
-from modelsync.schema.diff import SchemaDiffer, differences
-from modelsync.schema.objects import (
-    ColumnDef,
-    QualifiedName,
-    TableDef,
-)
+from modelsync.compare import SchemaDiffer, differences
+from modelsync.internal import ColumnDef, QualifiedName, TableDef
 
 
 def test_differences_added_removed_modified() -> None:

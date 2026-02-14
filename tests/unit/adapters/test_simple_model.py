@@ -1,7 +1,8 @@
 """
 Unit test: simple model column definitions.
 
-Traceability: docs/requirements/01-functional.md — Model discovery.
+Traceability: docs/requirements/01-functional.md — Model discovery;
+docs/technical/02-architecture.md (Core functions: Adapters ingest).
 """
 
 from typing import get_type_hints

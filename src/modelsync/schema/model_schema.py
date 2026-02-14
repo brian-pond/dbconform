@@ -1,4 +1,4 @@
-"""Re-export model schema builder. Canonical: modelsync.adapters.model_schema."""
+"""Re-export builder for model-side internal schema. Canonical: modelsync.adapters.model_schema."""
 
 from modelsync.adapters.model_schema import ModelSchema, _extract_table_def
 

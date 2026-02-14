@@ -1,11 +1,21 @@
 # Test organization
 
-Tests are split by kind:
+Tests are split by kind and, for unit tests, aligned with the **four core functions** in [docs/technical/02-architecture.md](../docs/technical/02-architecture.md):
 
 | Directory | Purpose |
 |-----------|--------|
-| **`unit/`** | Unit tests: no real database. They use mocks, in-memory structures, or the sql_dialect/plan/schema logic only. Fast and isolated. |
+| **`unit/`** | Unit tests: no real database. Layout mirrors architecture: **internal** (schema types), **adapters** (model → internal), **compare** (diff), **plan**, **sql_dialect** (DDL). Fast and isolated. |
 | **`integration/`** | Integration tests: use a real database via `empty_sqlite_db` (SQLite) or `empty_db` (parametrized: SQLite + PostgreSQL). They exercise ModelSync against actual tables. |
+
+## Unit test layout (by core function)
+
+| `unit/` subdir | Core function | Contents |
+|----------------|---------------|----------|
+| **`internal/`** | Internal schema | Neutral type names and helpers (`test_types.py`). |
+| **`adapters/`** | Adapters (ingest) | Model → internal: `ModelSchema`, `sa_column_to_neutral_type`, simple model sanity. |
+| **`compare/`** | Compare | SchemaDiffer, `differences()`, added/removed/modified tables. |
+| **`plan/`** | DDL generation (plan) | SyncPlanBuilder, step ordering, drop/shrink options. |
+| **`sql_dialect/`** | DDL generation (dialect) | Dialect-specific DDL (e.g. PostgreSQL serial, quoting). |
 
 ## Running tests
 

@@ -8,7 +8,7 @@ modelsync is organized around four distinct functions:
 
 1. **Internal schema** — Defines a neutral, library-agnostic representation of a SQL table's schema (tables, columns, constraints, indexes). No dependency on SQLAlchemy, Django, or other ORMs.
 2. **Adapters (ingest)** — Take well-known third-party models (SQLAlchemy, SQLModel; later Django, Tortoise, Piccolo) and produce the modelsync internal schema. Ingestion is **read-only**: we do not modify the caller's model classes or their `__table__` / columns.
-3. **Compare** — Reflect a live database into the internal schema and compare it to the model-derived internal schema; produce a structured diff (added, removed, modified).
+3. **Compare** — Reflect a live database into the database-side internal schema and compare it to the model-side internal schema; produce a structured diff (added, removed, modified).
 4. **DDL generation** — From the comparison result, build an ordered plan and generate dialect-specific DDL to bring the target database into parity with the model.
 
 The following diagram and sections describe how these functions are wired together.
@@ -57,7 +57,7 @@ flowchart LR
 ```
 
 - **ModelSchema** / **DatabaseSchema**: Internal schema (lightweight, frozen/immutable) representation of tables, columns, constraints, and indexes so the two sides can be compared by name/identity. See "Internal schema: design goals" above.
-- **SchemaDiffer**: Compares model schema to DB schema; produces added, removed, modified, and extra (unmanaged) tables.
+- **SchemaDiffer**: Compares model-side internal schema to database-side internal schema; produces added, removed, modified, and extra (unmanaged) tables.
 - **SyncPlanBuilder**: Builds an ordered list of DDL and data-operation steps from the diff, with dependency-safe ordering and configurable drop behavior.
 - **ModelSync** (facade): Library entry point; accepts connection or credentials and target schema, exposes `compare()` returning a **SyncPlan**.
 

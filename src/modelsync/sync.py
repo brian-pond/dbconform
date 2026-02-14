@@ -199,7 +199,7 @@ class ModelSync:
             )
             return builder.build(diff)
         except Exception as e:
-            e.add_note("During compare (model vs DB schema).")
+            e.add_note("During compare (model-side internal schema vs database-side internal schema).")
             return SyncError(
                 target_objects=[("compare", "schema")],
                 messages=[str(e)],

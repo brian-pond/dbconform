@@ -1,5 +1,5 @@
 """
-Compare: reflect DB into internal schema and diff against model schema.
+Compare: reflect DB into database-side internal schema and diff against model-side internal schema.
 
 See docs/technical/02-architecture.md (Core functions, Compare).
 """

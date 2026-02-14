@@ -1,0 +1,16 @@
+---
+description: When to treat folders as deletable (cleanup, empty-folder checks)
+alwaysApply: false
+---
+
+# Cleanup and deletable folders
+
+When identifying **potentially deletable folders** (e.g. for cleanup or "empty folder" requests), treat both of these as candidates for deletion:
+
+1. **Strictly empty directories** — no files, no subdirectories.
+2. **Effectively empty directories** — the only content is `__pycache__/` (no source, tests, or other real files). These are leftover test/code run artifacts and can be removed.
+
+Always exclude and do not suggest deleting:
+- `.git/` and anything under it
+- `build/`, `dist/`, `.venv/` (and similar) per project conventions
+- Directories under dependency or external clones (e.g. `inspiration_repos/`) unless the user is explicitly cleaning those

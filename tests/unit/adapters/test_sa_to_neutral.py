@@ -1,13 +1,13 @@
 """
 Unit tests for SQLAlchemy column to neutral type mapping.
 
-Traceability: Option B neutral type vocabulary; docs/technical/02-architecture.md (Types).
+Traceability: docs/technical/02-architecture.md (Core functions: Adapters ingest; Types).
 """
 
 from sqlalchemy import Column
 from sqlalchemy import types as sa_types
 
-from modelsync.schema.sa_to_neutral import sa_column_to_neutral_type
+from modelsync.adapters import sa_column_to_neutral_type
 
 
 def test_sa_column_integer() -> None:

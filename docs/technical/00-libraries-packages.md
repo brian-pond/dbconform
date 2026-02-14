@@ -15,7 +15,7 @@ Single place for modelsync library and package choices: rationale, alternatives,
 
 ## Runtime dependencies
 
-- **SQLAlchemy** (>=2.0): Used for metadata inspection (model schema extraction) and reflection (database schema). SQLModel builds on SQLAlchemy; callers may pass either SA or SQLModel models. See [01-functional](../requirements/01-functional.md) (Model frameworks).
+- **SQLAlchemy** (>=2.0): Used for metadata inspection (code models → model-side internal schema) and reflection (database-side internal schema). SQLModel builds on SQLAlchemy; callers may pass either SA or SQLModel models. See [01-functional](../requirements/01-functional.md) (Model frameworks).
 
 ## Optional dependencies (test / backend)
 
