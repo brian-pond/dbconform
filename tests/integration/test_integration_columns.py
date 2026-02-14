@@ -64,10 +64,7 @@ def test_multiple_columns_missing_in_db_do_sync_then_parity(
     engine = create_engine(url)
     with engine.connect() as conn:
         conn.execute(
-            text(
-                "CREATE TABLE simple_table (id INTEGER PRIMARY KEY, "
-                "name VARCHAR(255) NOT NULL)"
-            )
+            text("CREATE TABLE simple_table (id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL)")
         )
         conn.commit()
     engine.dispose()

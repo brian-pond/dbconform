@@ -27,11 +27,9 @@ How we provide real SQL databases for tests without polluting the filesystem or 
 ## PostgreSQL (implemented)
 
 - **Fixture** `empty_postgres_db` (in `tests/integration/conftest.py`): yields `(url, target_schema)` for an empty PostgreSQL database. **Isolation**: a unique database is created per test and dropped on teardown (AUTOCOMMIT for CREATE/DROP DATABASE).
-- **Sources** (in order):
-  1. **Env URL**: If `MODELSYNC_TEST_POSTGRES_URL` is set, that host is used; the fixture connects to the `postgres` database to create/drop the per-test database. Use for CI, local installs, or cloud instances.
-  2. **pytest-docker**: If the env var is not set, the fixture uses the `docker_services` and `docker_ip` fixtures from **pytest-docker**. A `postgres` service is defined in `tests/docker-compose.yml` (PostgreSQL 16). The compose file is selected via `tests/conftest.py` (`docker_compose_file`). To use **Podman** instead of Docker, set `MODELSYNC_TEST_POSTGRES_COMPOSE_CMD='podman compose'` (or `podman-compose`); `tests/conftest.py` overrides `docker_compose_command` from that env var.
-- **Skip**: If neither the env URL nor Docker is available, tests that depend on `empty_postgres_db` are skipped (e.g. parametrized postgres runs are skipped).
-- **Optional deps**: Install with `uv sync --all-extras` or `pip install -e ".[postgres]"` to get **psycopg** (driver) and **pytest-docker**. See [00-libraries-packages.md](00-libraries-packages.md).
+- **Source**: Set **`MODELSYNC_TEST_POSTGRES_URL`** (e.g. from `modelsync test postgres up` output). The fixture connects to the `postgres` database to create/drop the per-test database. Use for CI, local installs, or the CLI container.
+- **Skip**: If the env URL is not set, tests that depend on `empty_postgres_db` are skipped (e.g. parametrized postgres runs are skipped).
+- **Optional deps**: Install with `uv sync --all-extras` or `pip install -e ".[postgres]"` to get **psycopg** (driver). See [00-libraries-packages.md](00-libraries-packages.md).
 
 ## Test CLI (recommended workflow)
 
@@ -65,6 +63,4 @@ The **modelsync test** CLI provides a single entry point for the test workflow a
 
 ## Summary
 
-- **SQLite**: Current approach (tmp_path, `empty_sqlite_db` fixture, one DB file per test).
-- **PostgreSQL**: Implemented via `empty_postgres_db` (env `MODELSYNC_TEST_POSTGRES_URL` or pytest-docker); per-test database for isolation.
-- **MariaDB**: Not yet implemented; same pattern (env URL or Docker, per-test DB/schema) can be used when added.
+SQLite uses tmp_path and `empty_sqlite_db` (one DB file per test). PostgreSQL uses `empty_postgres_db` and `MODELSYNC_TEST_POSTGRES_URL` (per-test database; see "PostgreSQL (implemented)" above). MariaDB is not yet implemented; the same pattern (env URL or container, per-test DB/schema) applies when added.

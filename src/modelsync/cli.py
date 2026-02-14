@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -32,7 +31,8 @@ def _try_connect_postgres(url: str, timeout: float = 5.0) -> tuple[bool, str | N
     """
     Try to connect to Postgres at url (postgresql:// or postgresql+psycopg://),
     run SELECT 1 to validate auth and database. Returns (True, None) on success;
-    (False, error_message) on failure. Requires psycopg; returns (False, 'psycopg not installed') if missing.
+    (False, error_message) on failure. Requires psycopg; returns (False, 'psycopg not installed')
+    if missing.
     """
     try:
         import psycopg
@@ -40,10 +40,9 @@ def _try_connect_postgres(url: str, timeout: float = 5.0) -> tuple[bool, str | N
         return (False, "psycopg not installed")
     conninfo = url.replace("postgresql+psycopg://", "postgresql://", 1)
     try:
-        with psycopg.connect(conninfo, connect_timeout=timeout) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
+        with psycopg.connect(conninfo, connect_timeout=timeout) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
         return (True, None)
     except psycopg.OperationalError as e:
         return (False, str(e).strip())
@@ -72,7 +71,8 @@ def _get_container_cmd() -> str:
     if path:
         return path
     typer.echo(
-        "Container runtime not found (docker/podman). Set MODELSYNC_CONTAINER_CMD or install Docker/Podman.",
+        "Container runtime not found (docker/podman). Set MODELSYNC_CONTAINER_CMD "
+        "or install Docker/Podman.",
         err=True,
     )
     raise typer.Exit(1)
@@ -85,7 +85,8 @@ def _run(
     timeout: int | None = 120,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run a command; return CompletedProcess. Raises on timeout. If env is set, it replaces the process env."""
+    """Run a command; return CompletedProcess. Raises on timeout.
+    If env is set, it replaces the process env."""
     kwargs: dict = {"capture_output": capture, "text": True, "timeout": timeout}
     if env is not None:
         kwargs["env"] = env
@@ -122,7 +123,8 @@ def _test_callback(ctx: typer.Context) -> None:
 def check_container() -> None:
     """
     Verify container runtime and Postgres image: run a short-lived container, then remove it.
-    Exit 0 on success; exit 1 with a clear message on failure (runtime not found, image pull, start).
+    Exit 0 on success; exit 1 with a clear message on failure
+    (runtime not found, image pull, start).
     """
     cmd = _get_container_cmd()
     # --rm: remove when done. We use "sleep 2" (not pg_isready) because overriding CMD
@@ -199,7 +201,8 @@ def postgres_up() -> None:
         err = (proc.stderr or proc.stdout or "").strip()
         if "already in use" in err or "Conflict" in err or "exists" in err:
             typer.echo(
-                f"Container {CONTAINER_NAME} already exists. Run 'modelsync test postgres down' first.",
+                f"Container {CONTAINER_NAME} already exists. "
+                "Run 'modelsync test postgres down' first.",
                 err=True,
             )
         else:
@@ -209,7 +212,10 @@ def postgres_up() -> None:
     ok, err_msg = _try_connect_postgres(POSTGRES_URL, timeout=3)
     if err_msg == "psycopg not installed":
         typer.echo(f"Set: MODELSYNC_TEST_POSTGRES_URL={POSTGRES_URL}")
-        typer.echo("Run 'modelsync test run' to run tests. (Install [postgres] extra to verify connection at start.)")
+        typer.echo(
+            "Run 'modelsync test run' to run tests. "
+            "(Install [postgres] extra to verify connection at start.)"
+        )
         return
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
@@ -225,7 +231,8 @@ def postgres_up() -> None:
             typer.echo(
                 "Port 5433 is in use by another Postgres (password rejected). "
                 "Stop that service, then run 'modelsync test postgres up' again. "
-                "Or use a different port by setting MODELSYNC_TEST_POSTGRES_URL to your own instance.",
+                "Or use a different port by setting MODELSYNC_TEST_POSTGRES_URL "
+                "to your own instance.",
                 err=True,
             )
             raise typer.Exit(1)
@@ -234,7 +241,8 @@ def postgres_up() -> None:
     _run([container_cmd, "rm", CONTAINER_NAME], timeout=5)
     typer.echo(
         "Container did not accept connections in 30s; removed it. "
-        "If another process was using port 5433, stop it and run 'modelsync test postgres up' again.",
+        "If another process was using port 5433, stop it and "
+        "run 'modelsync test postgres up' again.",
         err=True,
     )
     raise typer.Exit(1)
@@ -261,12 +269,14 @@ def postgres_down() -> None:
 def postgres_status() -> None:
     """
     Check that the long-lived Postgres container is running and accepting connections.
-    Runs SELECT 1 inside the container via exec. Exit 0 on success; 1 if container not running or query fails.
+    Runs SELECT 1 inside the container via exec. Exit 0 on success;
+    1 if container not running or query fails.
     """
     container_cmd = _get_container_cmd()
     if not _container_running(container_cmd):
         typer.echo(
-            f"Container {CONTAINER_NAME} is not running. Run 'modelsync test postgres up' to start it.",
+            f"Container {CONTAINER_NAME} is not running. "
+            "Run 'modelsync test postgres up' to start it.",
             err=True,
         )
         raise typer.Exit(1)
@@ -298,10 +308,11 @@ def postgres_status() -> None:
 @test_app.command("run")
 def test_run() -> None:
     """
-    Run the test suite (pytest). Exit 0 if all pass; 1 on test failure; 2 if tests were skipped
-    because Postgres was not available (run check-container and postgres up, set URL, then try again).
+    Run the test suite (pytest). Exit 0 if all pass; 1 on test failure; 2 if skipped
+    (e.g. Postgres not available: run check-container, postgres up, set URL, try again).
     """
-    # If MODELSYNC_TEST_POSTGRES_URL unset but our perpetual container is running, use its URL for pytest
+    # If MODELSYNC_TEST_POSTGRES_URL unset but our perpetual container is running,
+    # use its URL for pytest
     pytest_env = dict(os.environ)
     if not pytest_env.get("MODELSYNC_TEST_POSTGRES_URL"):
         container_cmd = _get_container_cmd_optional()
@@ -312,8 +323,9 @@ def test_run() -> None:
             if container_cmd:
                 typer.echo(
                     "Postgres tests need a running Postgres. Run 'modelsync test check-container', "
-                    "then 'modelsync test postgres up', set MODELSYNC_TEST_POSTGRES_URL as printed, "
-                    "then 'modelsync test run' again. Or ensure Docker/Podman is running for pytest-docker.",
+                    "then 'modelsync test postgres up', set MODELSYNC_TEST_POSTGRES_URL "
+                    "as printed, then 'modelsync test run' again. "
+                    "Or start Postgres and set MODELSYNC_TEST_POSTGRES_URL.",
                     err=True,
                 )
                 raise typer.Exit(EXIT_POSTGRES_UNAVAILABLE)
@@ -325,14 +337,16 @@ def test_run() -> None:
             if err_msg == "psycopg not installed":
                 typer.echo(
                     "Postgres tests require the 'psycopg' package. "
-                    "Install it with: uv sync --extra postgres (or pip install 'modelsync[postgres]').",
+                    "Install it with: uv sync --extra postgres "
+                    "(or pip install 'modelsync[postgres]').",
                     err=True,
                 )
             elif err_msg and "password authentication failed" in err_msg:
                 typer.echo(
                     "Could not connect to Postgres: password authentication failed. "
                     "If using the CLI container, run 'modelsync test postgres down' then "
-                    "'modelsync test postgres up' to recreate it. Otherwise check user/password in MODELSYNC_TEST_POSTGRES_URL.",
+                    "'modelsync test postgres up' to recreate it. "
+                    "Otherwise check user/password in MODELSYNC_TEST_POSTGRES_URL.",
                     err=True,
                 )
             else:
@@ -345,10 +359,12 @@ def test_run() -> None:
     if not tests_dir.is_dir():
         typer.echo(f"Tests directory not found: {tests_dir}", err=True)
         raise typer.Exit(1)
-    # Run pytest in-process so it sees the same os.environ we validated (avoids subprocess env issues).
+    # Run pytest in-process so it sees the same os.environ we validated
+    # (avoids subprocess env issues).
     for key, value in pytest_env.items():
         os.environ[key] = value
     import pytest as pytest_module
+
     exit_code = pytest_module.main([str(tests_dir), "-v", "-rs"])
     raise typer.Exit(exit_code)
 

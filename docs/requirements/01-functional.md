@@ -22,7 +22,7 @@
 
 ### CLI scope
 - In Phase 1, the **CLI is primarily for running tests** (and possibly that alone). The main use of modelsync is as a library: callers import it and invoke the API with their models and connection/credentials.
-- **Test CLI** (`modelsync test`): Commands for the test workflow so users avoid raw `pytest` and get clear feedback when Postgres is unavailable. `modelsync test check-container` verifies Docker/Podman and the Postgres image (create, start, stop, remove a short-lived container); exit 1 with a clear message on failure (runtime not found, image pull failed, container start failed). `modelsync test postgres up` starts a long-lived Postgres container (name `modelsync-postgres`, port 5433) and prints `MODELSYNC_TEST_POSTGRES_URL` to set; `modelsync test postgres down` stops and removes it. `modelsync test run` runs the test suite (pytest); exit 0 if all pass, 1 on test failure, **2** when tests were skipped because Postgres was not available (with a message to run check-container and postgres up, set URL, then run again). Container runtime is chosen via `MODELSYNC_CONTAINER_CMD` (docker/podman) or auto-detection.
+- **Test CLI** (`modelsync test`): Commands for the test workflow (check-container, postgres up/down, test run). Exit 2 when Postgres is unavailable. See [01-test-database.md](../technical/01-test-database.md) for commands and exit codes.
 - **Suggestion**: A minimal sync CLI (e.g. one command that accepts a model module and DB URL and runs compare/sync) could be added later for ad-hoc runs or CI without writing Python; this is optional and not required for Phase 1.
 
 ### Sync flow and confirmation
@@ -32,7 +32,7 @@
 - **Opt-in flags**: The API exposes four boolean flags on `compare()` and `do_sync()`:
   - **allow_drop_table**: when True, the plan may include DROP TABLE steps for tables present in the DB but not in the model. Default false.
   - **allow_drop_column**: when True, the plan may include DROP COLUMN steps for columns present in the DB but not in the model. Default false.
-  - **allow_drop_constraint**: when True (default), the plan may include DROP CONSTRAINT / DROP INDEX steps for unique, foreign key, check, or index objects removed from the model. Default True because dropping a constraint or index does not cause data loss and is easily reversible.
+  - **allow_drop_constraint**: when True (default), the plan may include DROP CONSTRAINT / DROP INDEX steps for unique, foreign key, check, or index objects removed from the model. Default True (no data loss, easily reversible).
   - **allow_shrink_column**: when True, the plan may include ALTER COLUMN steps that shrink a column (e.g. reduce VARCHAR length); when False (default), such changes are omitted to avoid data-loss risk unless the caller opts in.
 
 ### Transaction behavior

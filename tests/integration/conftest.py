@@ -1,39 +1,17 @@
 """
-Pytest fixtures for integration tests.
+Pytest fixtures for integration tests (SQLite, PostgreSQL).
 
-Test database strategy (docs/technical/01-test-database.md):
-- Use pytest's tmp_path (not home dir) for writable, isolated, auto-cleaned paths.
-- Each test gets a fresh empty SQLite DB via empty_sqlite_db fixture.
-- PostgreSQL: empty_postgres_db uses MODELSYNC_TEST_POSTGRES_URL or pytest-docker;
-  per-test DB for isolation. Skip if neither available.
-- Teardown: engine disposed in fixture; tmp_path is removed by pytest after the run.
+Strategy: tmp_path for SQLite; per-test DB for Postgres when MODELSYNC_TEST_POSTGRES_URL is set.
+See docs/technical/01-test-database.md.
 """
 
 import os
-import time
 import uuid
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import make_url, URL
-
-
-def _wait_for_postgres(url: str, timeout_seconds: float = 15.0) -> None:
-    """Retry connecting to Postgres until ready (e.g. when compose was started without --wait)."""
-    engine = create_engine(url)
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        try:
-            with engine.connect():
-                pass
-        except Exception:
-            time.sleep(0.5)
-        else:
-            engine.dispose()
-            return
-    engine.dispose()
-    raise RuntimeError(f"Postgres at {url!r} did not become ready within {timeout_seconds}s")
+from sqlalchemy.engine import URL, make_url
 
 
 def _normalize_postgres_url(url: str) -> str:
@@ -68,46 +46,30 @@ def empty_sqlite_db(tmp_path: Path) -> tuple[Path, str]:
 
 
 @pytest.fixture
-def empty_postgres_db(request: pytest.FixtureRequest) -> tuple[str, str]:
+def empty_postgres_db() -> tuple[str, str]:
     """
     Provide an empty PostgreSQL database for the test.
 
-    Uses MODELSYNC_TEST_POSTGRES_URL if set (admin operations use same host with
-    database=postgres). Otherwise uses pytest-docker (docker-compose postgres
-    service). Creates a unique database per test for isolation; drops it on teardown.
-
-    Yields:
-        (url, target_schema): SQLAlchemy URL (postgresql+psycopg://...) and schema name "public".
-
-    Skips if neither env URL nor Docker Postgres is available (requires [postgres] extra).
+    Yields (url, target_schema). Skips if MODELSYNC_TEST_POSTGRES_URL is unset.
+    See docs/technical/01-test-database.md.
     """
     env_url = os.environ.get("MODELSYNC_TEST_POSTGRES_URL")
-    if env_url:
-        normalized = _normalize_postgres_url(env_url)
-        parsed = make_url(normalized)
-        # Use URL.create() instead of str(parsed.set(...)): in some SQLAlchemy versions,
-        # str(URL) masks the password (e.g. postgresql://user:***@host/db), and create_engine()
-        # then receives that literal "***" and connection fails with "password authentication
-        # failed". Building from components preserves the real password.
-        admin_url = URL.create(
-            parsed.drivername,
-            parsed.username,
-            parsed.password,
-            host=parsed.host,
-            port=parsed.port,
-            database="postgres",
+    if not env_url:
+        pytest.skip(
+            "PostgreSQL not available: set MODELSYNC_TEST_POSTGRES_URL "
+            "(e.g. run 'modelsync test postgres up' and use the printed URL)."
         )
-    else:
-        try:
-            docker_services = request.getfixturevalue("docker_services")
-            docker_ip = request.getfixturevalue("docker_ip")
-        except Exception as e:
-            pytest.skip(
-                f"PostgreSQL not available: set MODELSYNC_TEST_POSTGRES_URL or use pytest-docker. Reason: {e!s}"
-            )
-        port = docker_services.port_for("postgres", 5432)
-        admin_url = f"postgresql+psycopg://postgres:postgres@{docker_ip}:{port}/postgres"
-        _wait_for_postgres(admin_url)
+    normalized = _normalize_postgres_url(env_url)
+    parsed = make_url(normalized)
+    # Use URL.create() so the password is preserved (str(URL) can mask it in some versions).
+    admin_url = URL.create(
+        parsed.drivername,
+        parsed.username,
+        parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database="postgres",
+    )
 
     test_db_name = "modelsync_test_" + uuid.uuid4().hex[:12]
     engine_admin = create_engine(admin_url)
@@ -132,10 +94,18 @@ def empty_postgres_db(request: pytest.FixtureRequest) -> tuple[str, str]:
 
     yield (test_url_str, "public")
 
+    # Teardown: terminate other sessions using the test DB, then drop it.
     engine_teardown = create_engine(admin_url)
     try:
         with engine_teardown.connect() as conn:
             conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :db AND pid <> pg_backend_pid()"
+                ),
+                {"db": test_db_name},
+            )
             conn.execute(text(f'DROP DATABASE "{test_db_name}"'))
     finally:
         engine_teardown.dispose()

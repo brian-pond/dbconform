@@ -1,5 +1,6 @@
 """
-Integration tests: ModelSync.compare() against a real SQLite database.
+Integration tests: ModelSync.compare() and do_sync() against a real database
+(SQLite and PostgreSQL via empty_db).
 
 Traceability: docs/requirements/01-functional.md — Model discovery and API,
 Database connection, compare() / do_sync(). Acceptance: schema (create tables, columns).
@@ -30,6 +31,29 @@ def test_empty_sqlite_db_fixture(empty_sqlite_db: tuple[Path, str]) -> None:
         names = [row[0] for row in result]
     engine.dispose()
     assert "t" in names
+
+
+def test_empty_postgres_db_fixture(empty_postgres_db: tuple[str, str]) -> None:
+    """Use empty_postgres_db fixture: DB exists, is writable, and can have tables created.
+    Skips when MODELSYNC_TEST_POSTGRES_URL is not set (01-functional: database connection)."""
+    url, schema = empty_postgres_db
+    assert schema == "public"
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(
+            text("CREATE TABLE t (id SERIAL PRIMARY KEY)")
+        )
+        conn.commit()
+        result = conn.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = 't'"
+            )
+        )
+        rows = list(result)
+    engine.dispose()
+    assert len(rows) == 1
+    assert rows[0][0] == "t"
 
 
 def test_compare_empty_db_returns_create_step(empty_db: tuple[str, str | None]) -> None:
@@ -128,13 +152,16 @@ def test_compare_invalid_model_returns_sync_error(empty_db: tuple[str, str | Non
     result = sync.compare(NotATable)
     assert isinstance(result, modelsync.SyncError)
     assert len(result.messages) >= 1
-    assert len(result.target_objects) >= 1, "SyncError must identify which target failed (01-functional: Error handling)"
+    assert len(result.target_objects) >= 1, (
+        "SyncError must identify which target failed (01-functional: Error handling)"
+    )
 
 
 def test_do_sync_apply_failure_returns_sync_error_with_target_objects(
     empty_sqlite_db: tuple[Path, str],
 ) -> None:
-    """When a plan step fails during apply (e.g. unsupported SQL on SQLite), do_sync returns SyncError with target_objects (01-functional: Error handling)."""
+    """When a plan step fails during apply (e.g. unsupported SQL on SQLite), do_sync returns
+    SyncError with target_objects (01-functional: Error handling)."""
     _path, url = empty_sqlite_db
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -148,19 +175,48 @@ def test_do_sync_apply_failure_returns_sync_error_with_target_objects(
         conn.commit()
     engine.dispose()
 
-    # SimpleTableWithUnique adds UNIQUE(name); SQLite does not support ALTER TABLE ADD CONSTRAINT, so apply fails.
+    # SimpleTableWithUnique adds UNIQUE(name); SQLite does not support ALTER TABLE ADD CONSTRAINT.
     sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
     result = sync.do_sync(SimpleTableWithUnique)
     assert isinstance(result, modelsync.SyncError)
     assert len(result.messages) >= 1
     assert len(result.target_objects) >= 1
-    assert any(
-        obj[0] == "table" or obj[0] == "step" for obj in result.target_objects
-    )
+    assert any(obj[0] == "table" or obj[0] == "step" for obj in result.target_objects)
+
+
+def test_do_sync_apply_failure_returns_sync_error_with_target_objects_postgres(
+    empty_postgres_db: tuple[str, str],
+) -> None:
+    """When a plan step fails during apply (e.g. SET NOT NULL with existing NULLs),
+    do_sync returns SyncError with target_objects (01-functional: Error handling)."""
+    url, schema = empty_postgres_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE simple_table ("
+                "id SERIAL PRIMARY KEY, name VARCHAR(255), "
+                "value DOUBLE PRECISION NOT NULL, count INTEGER NOT NULL)"
+            )
+        )
+        conn.execute(
+            text("INSERT INTO simple_table (name, value, count) VALUES (NULL, 1.0, 0)")
+        )
+        conn.commit()
+    engine.dispose()
+
+    # SimpleTable has name NOT NULL; DB has NULL in name. ALTER COLUMN SET NOT NULL fails.
+    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=schema)
+    result = sync.do_sync(SimpleTable)
+    assert isinstance(result, modelsync.SyncError)
+    assert len(result.messages) >= 1
+    assert len(result.target_objects) >= 1
+    assert any(obj[0] == "table" or obj[0] == "step" for obj in result.target_objects)
 
 
 def test_do_sync_commit_per_step_succeeds(empty_db: tuple[str, str | None]) -> None:
-    """do_sync(..., commit_per_step=True) applies plan and commits after each step (01-functional: Transaction behavior)."""
+    """do_sync(..., commit_per_step=True) applies plan and commits after each step
+    (01-functional: Transaction behavior)."""
     url, target_schema = empty_db
     sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
     result = sync.do_sync(SimpleTable, commit_per_step=True)
@@ -173,7 +229,8 @@ def test_do_sync_commit_per_step_succeeds(empty_db: tuple[str, str | None]) -> N
 def test_do_sync_emits_structured_logs_no_secrets(
     empty_db: tuple[str, str | None], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Applied steps are logged as JSON lines to stdout; no secrets (02-non-functional: Observability)."""
+    """Applied steps are logged as JSON lines to stdout; no secrets
+    (02-non-functional: Observability)."""
     url, target_schema = empty_db
     sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
     sync.do_sync(SimpleTable)
@@ -196,7 +253,8 @@ def test_do_sync_emits_structured_logs_no_secrets(
 
 
 def test_do_sync_log_file_written(empty_db: tuple[str, str | None], tmp_path: Path) -> None:
-    """Optional log_file receives same structured log lines (02-non-functional: optional log file)."""
+    """Optional log_file receives same structured log lines
+    (02-non-functional: optional log file)."""
     url, target_schema = empty_db
     log_path = tmp_path / "modelsync.log"
     sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
@@ -209,7 +267,8 @@ def test_do_sync_log_file_written(empty_db: tuple[str, str | None], tmp_path: Pa
 
 
 def test_do_sync_invalid_url_returns_sync_error() -> None:
-    """Invalid or unreachable DB URL yields SyncError with target_objects (01-functional: Error handling)."""
+    """Invalid or unreachable DB URL yields SyncError with target_objects
+    (01-functional: Error handling)."""
     sync = modelsync.ModelSync(
         credentials={"url": "postgresql://localhost:19999/nonexistent_db"},
         target_schema="public",
@@ -235,7 +294,8 @@ def test_compare_empty_model_list_returns_empty_plan(
 def test_missing_index_do_sync_creates_index(
     empty_db: tuple[str, str | None],
 ) -> None:
-    """Model has index on column; DB has table but no index. Plan has CREATE INDEX; do_sync applies (01-functional: add/remove indexes)."""
+    """Model has index on column; DB has table but no index. Plan has CREATE INDEX;
+    do_sync applies (01-functional: add/remove indexes)."""
     url, target_schema = empty_db
     sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
     sync.do_sync(SimpleTableWithIndex)

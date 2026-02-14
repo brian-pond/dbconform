@@ -44,6 +44,7 @@ def differences(
     keys_added = b_keys - a_keys
     keys_removed = a_keys - b_keys
     keys_common = a_keys & b_keys
+
     def sort_key(k: K) -> tuple[str, str]:
         if isinstance(k, QualifiedName):
             return (k.schema or "", k.name)
@@ -120,15 +121,9 @@ class DiffResult:
     - modified_tables: in both but different -> emit ALTER per TableDiff.
     """
 
-    added_tables: OrderedDict[QualifiedName, TableDef] = field(
-        default_factory=OrderedDict
-    )
-    removed_tables: OrderedDict[QualifiedName, TableDef] = field(
-        default_factory=OrderedDict
-    )
-    modified_tables: OrderedDict[QualifiedName, TableDiff] = field(
-        default_factory=OrderedDict
-    )
+    added_tables: OrderedDict[QualifiedName, TableDef] = field(default_factory=OrderedDict)
+    removed_tables: OrderedDict[QualifiedName, TableDef] = field(default_factory=OrderedDict)
+    modified_tables: OrderedDict[QualifiedName, TableDiff] = field(default_factory=OrderedDict)
 
 
 def _diff_columns(
@@ -138,9 +133,7 @@ def _diff_columns(
     added = [new_cols[k] for k in new_cols if k not in old_cols]
     removed = [old_cols[k] for k in old_cols if k not in new_cols]
     modified = [
-        (old_cols[k], new_cols[k])
-        for k in old_cols
-        if k in new_cols and old_cols[k] != new_cols[k]
+        (old_cols[k], new_cols[k]) for k in old_cols if k in new_cols and old_cols[k] != new_cols[k]
     ]
     return added, removed, modified
 
@@ -153,11 +146,7 @@ def _diff_uniques(
     new_d = _dict_from(new.unique_constraints, _unique_key)
     added = [new_d[k] for k in new_d if k not in old_d]
     removed = [old_d[k] for k in old_d if k not in new_d]
-    modified = [
-        (old_d[k], new_d[k])
-        for k in old_d
-        if k in new_d and old_d[k] != new_d[k]
-    ]
+    modified = [(old_d[k], new_d[k]) for k in old_d if k in new_d and old_d[k] != new_d[k]]
     return added, removed, modified
 
 
@@ -169,11 +158,7 @@ def _diff_fks(
     new_d = _dict_from(new.foreign_keys, _fk_key)
     added = [new_d[k] for k in new_d if k not in old_d]
     removed = [old_d[k] for k in old_d if k not in new_d]
-    modified = [
-        (old_d[k], new_d[k])
-        for k in old_d
-        if k in new_d and old_d[k] != new_d[k]
-    ]
+    modified = [(old_d[k], new_d[k]) for k in old_d if k in new_d and old_d[k] != new_d[k]]
     return added, removed, modified
 
 
@@ -185,11 +170,7 @@ def _diff_checks(
     new_d = _dict_from(new.check_constraints, _check_key)
     added = [new_d[k] for k in new_d if k not in old_d]
     removed = [old_d[k] for k in old_d if k not in new_d]
-    modified = [
-        (old_d[k], new_d[k])
-        for k in old_d
-        if k in new_d and old_d[k] != new_d[k]
-    ]
+    modified = [(old_d[k], new_d[k]) for k in old_d if k in new_d and old_d[k] != new_d[k]]
     return added, removed, modified
 
 
@@ -201,11 +182,7 @@ def _diff_indexes(
     new_d = _dict_from(new.indexes, _index_key)
     added = [new_d[k] for k in new_d if k not in old_d]
     removed = [old_d[k] for k in old_d if k not in new_d]
-    modified = [
-        (old_d[k], new_d[k])
-        for k in old_d
-        if k in new_d and old_d[k] != new_d[k]
-    ]
+    modified = [(old_d[k], new_d[k]) for k in old_d if k in new_d and old_d[k] != new_d[k]]
     return added, removed, modified
 
 

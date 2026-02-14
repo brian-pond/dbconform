@@ -7,8 +7,8 @@ Traceability: docs/requirements/01-functional.md (Schema parity, Identifiers and
 from modelsync.dialect.postgresql import PostgreSQLDialect
 from modelsync.schema.objects import (
     ColumnDef,
-    QualifiedName,
     PrimaryKeyDef,
+    QualifiedName,
     TableDef,
     UniqueDef,
 )
@@ -79,3 +79,43 @@ def test_postgresql_would_shrink() -> None:
     new_255 = ColumnDef("name", "VARCHAR(255)", nullable=False)
     assert dialect.would_shrink(old_500, new_255) is True
     assert dialect.would_shrink(new_255, old_500) is False
+
+
+def test_postgresql_parse_varchar_length() -> None:
+    """Base _parse_varchar_length parses VARCHAR(n) and CHARACTER VARYING(n)."""
+    dialect = PostgreSQLDialect()
+    assert dialect._parse_varchar_length("VARCHAR(255)") == 255
+    assert dialect._parse_varchar_length("CHARACTER VARYING(100)") == 100
+    assert dialect._parse_varchar_length("CHAR(10)") == 10
+    assert dialect._parse_varchar_length("INTEGER") is None
+    assert dialect._parse_varchar_length("VARCHAR( 500 )") == 500
+
+
+def test_postgresql_to_canonical_type_expr() -> None:
+    """PostgreSQL to_canonical_type_expr normalizes reflected type strings."""
+    dialect = PostgreSQLDialect()
+    assert dialect.to_canonical_type_expr("DOUBLE PRECISION") == "FLOAT"
+    assert dialect.to_canonical_type_expr("REAL") == "FLOAT"
+    assert dialect.to_canonical_type_expr("CHARACTER VARYING(255)") == "VARCHAR(255)"
+    assert dialect.to_canonical_type_expr("varchar(100)") == "VARCHAR(100)"
+    assert dialect.to_canonical_type_expr("INTEGER") == "INTEGER"
+    assert dialect.to_canonical_type_expr("VARCHAR  ( 50 )") == "VARCHAR(50)"
+
+
+def test_postgresql_to_ddl_type_serial() -> None:
+    """PostgreSQL to_ddl_type returns SERIAL/BIGSERIAL for autoincrement PK."""
+    dialect = PostgreSQLDialect()
+    col_int = ColumnDef("id", "INTEGER", nullable=False, autoincrement=True)
+    col_big = ColumnDef("id", "BIGINT", nullable=False, autoincrement=True)
+    assert dialect.to_ddl_type(col_int, pk_autoincrement=True) == "SERIAL"
+    assert dialect.to_ddl_type(col_big, pk_autoincrement=True) == "BIGSERIAL"
+    assert dialect.to_ddl_type(col_int, pk_autoincrement=False) == "INTEGER"
+    assert dialect.to_ddl_type(col_int, pk_autoincrement=True) == "SERIAL"
+
+
+def test_postgresql_to_ddl_type_plain() -> None:
+    """PostgreSQL to_ddl_type returns type_expr when not SERIAL."""
+    dialect = PostgreSQLDialect()
+    col = ColumnDef("name", "VARCHAR(255)", nullable=False)
+    assert dialect.to_ddl_type(col) == "VARCHAR(255)"
+    assert dialect.to_ddl_type(col, pk_autoincrement=False) == "VARCHAR(255)"

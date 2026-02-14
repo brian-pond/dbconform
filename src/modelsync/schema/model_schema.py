@@ -9,7 +9,7 @@ definitions and build a ModelSchema (name -> TableDef). See docs/requirements/01
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import Table
 from sqlalchemy.engine import Dialect
@@ -44,9 +44,7 @@ def _column_type_str(column: Any, dialect: Dialect) -> str:
 
 def _default_expr(column: Any, _dialect: Dialect) -> str | None:
     """Return server default expression as string, or None."""
-    default = getattr(column, "server_default", None) or getattr(
-        column, "default", None
-    )
+    default = getattr(column, "server_default", None) or getattr(column, "default", None)
     if default is None:
         return None
     if hasattr(default, "arg") and default.arg is not None:
@@ -88,9 +86,7 @@ def _extract_table_def(
 
     primary_key: PrimaryKeyDef | None = None
     if table.primary_key and table.primary_key.columns:
-        primary_key = PrimaryKeyDef(
-            column_names=tuple(c.name for c in table.primary_key.columns)
-        )
+        primary_key = PrimaryKeyDef(column_names=tuple(c.name for c in table.primary_key.columns))
 
     unique_constraints: list[UniqueDef] = []
     foreign_keys: list[ForeignKeyDef] = []
@@ -106,9 +102,7 @@ def _extract_table_def(
             )
         elif isinstance(constraint, CheckConstraint):
             expression = str(constraint.sqltext)
-            check_constraints.append(
-                CheckDef(name=constraint.name, expression=expression)
-            )
+            check_constraints.append(CheckDef(name=constraint.name, expression=expression))
         elif isinstance(constraint, ForeignKeyConstraint):
             ref_col = next(iter(constraint.elements)).column
             ref_table = ref_col.table
@@ -147,6 +141,12 @@ def _extract_table_def(
     )
 
 
+class _SchemaNormalizer(Protocol):
+    """Protocol for normalizing a TableDef so it compares equal across backends."""
+
+    def normalize_reflected_table(self, table_def: TableDef) -> TableDef: ...
+
+
 class ModelSchema:
     """
     Canonical schema derived from code models (SQLAlchemy/SQLModel).
@@ -168,6 +168,8 @@ class ModelSchema:
         models: type | Sequence[type],
         dialect: Dialect,
         target_schema: str | None = None,
+        *,
+        schema_normalizer: _SchemaNormalizer | None = None,
     ) -> ModelSchema:
         """
         Build ModelSchema from one or more model classes.
@@ -175,6 +177,8 @@ class ModelSchema:
         Each model must have __table__ (SQLAlchemy Table). Uses the given
         dialect to compile column types to strings. target_schema is used
         when table.schema is None (e.g. PostgreSQL default schema).
+        If schema_normalizer is provided (e.g. modelsync Dialect), its
+        normalize_reflected_table is applied so model schema compares equal to reflected DB.
         """
         if isinstance(models, type):
             model_seq: Sequence[type] = (models,)
@@ -184,5 +188,7 @@ class ModelSchema:
         for model in model_seq:
             table = _get_table_from_model(model)
             table_def = _extract_table_def(table, dialect, target_schema)
+            if schema_normalizer is not None:
+                table_def = schema_normalizer.normalize_reflected_table(table_def)
             instance._tables[table_def.name] = table_def
         return instance

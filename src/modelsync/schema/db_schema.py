@@ -16,6 +16,18 @@ from modelsync.schema.model_schema import _extract_table_def
 from modelsync.schema.objects import QualifiedName, TableDef
 
 
+def _dialect_for_connection(connection: Connection):
+    """Return our Dialect for the connection's engine (for normalize_reflected_table)."""
+    from modelsync.dialect import PostgreSQLDialect, SQLiteDialect
+
+    name = connection.dialect.name
+    if name == "sqlite":
+        return SQLiteDialect()
+    if name == "postgresql":
+        return PostgreSQLDialect()
+    raise ValueError(f"Unsupported dialect: {name}. Supported: sqlite, postgresql.")
+
+
 class DatabaseSchema:
     """
     Canonical schema derived from a live database via reflection.
@@ -58,5 +70,6 @@ class DatabaseSchema:
             if target_schema is not None and schema != target_schema:
                 continue
             table_def = _extract_table_def(table, dialect, target_schema)
+            table_def = _dialect_for_connection(connection).normalize_reflected_table(table_def)
             instance._tables[table_def.name] = table_def
         return instance

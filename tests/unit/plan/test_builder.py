@@ -26,12 +26,17 @@ def test_sync_plan_statements_and_sql() -> None:
 def test_builder_added_table_produces_create_step() -> None:
     """One added table -> one CreateTable step."""
     diff = DiffResult(
-        added_tables=OrderedDict([
-            (QualifiedName(None, "foo"), TableDef(
-                name=QualifiedName(None, "foo"),
-                columns=(ColumnDef("id", "INTEGER", nullable=False),),
-            )),
-        ]),
+        added_tables=OrderedDict(
+            [
+                (
+                    QualifiedName(None, "foo"),
+                    TableDef(
+                        name=QualifiedName(None, "foo"),
+                        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+                    ),
+                ),
+            ]
+        ),
         removed_tables=OrderedDict(),
         modified_tables=OrderedDict(),
     )
@@ -45,12 +50,17 @@ def test_builder_removed_table_in_extra_no_drop() -> None:
     """Removed table (DB-only) -> extra_tables, no DROP step when allow_drop_table=False."""
     diff = DiffResult(
         added_tables=OrderedDict(),
-        removed_tables=OrderedDict([
-            (QualifiedName(None, "orphan"), TableDef(
-                name=QualifiedName(None, "orphan"),
-                columns=(ColumnDef("id", "INTEGER", nullable=False),),
-            )),
-        ]),
+        removed_tables=OrderedDict(
+            [
+                (
+                    QualifiedName(None, "orphan"),
+                    TableDef(
+                        name=QualifiedName(None, "orphan"),
+                        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+                    ),
+                ),
+            ]
+        ),
         modified_tables=OrderedDict(),
     )
     plan = SyncPlanBuilder(SQLiteDialect(), report_extra_tables=True).build(diff)
@@ -60,15 +70,21 @@ def test_builder_removed_table_in_extra_no_drop() -> None:
 
 
 def test_builder_removed_table_drop_when_allow_drop_table() -> None:
-    """Removed table (DB-only) -> DROP TABLE step when allow_drop_table=True (01-functional: Opt-in flags)."""
+    """Removed table (DB-only) -> DROP TABLE when allow_drop_table=True
+    (01-functional: Opt-in flags)."""
     diff = DiffResult(
         added_tables=OrderedDict(),
-        removed_tables=OrderedDict([
-            (QualifiedName(None, "orphan"), TableDef(
-                name=QualifiedName(None, "orphan"),
-                columns=(ColumnDef("id", "INTEGER", nullable=False),),
-            )),
-        ]),
+        removed_tables=OrderedDict(
+            [
+                (
+                    QualifiedName(None, "orphan"),
+                    TableDef(
+                        name=QualifiedName(None, "orphan"),
+                        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+                    ),
+                ),
+            ]
+        ),
         modified_tables=OrderedDict(),
     )
     plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_table=True).build(diff)
@@ -96,13 +112,18 @@ def test_builder_removed_column_drop_when_allow_drop_column() -> None:
     diff = DiffResult(
         added_tables=OrderedDict(),
         removed_tables=OrderedDict(),
-        modified_tables=OrderedDict([
-            (qualified, TableDiff(
-                old_table=old_table,
-                new_table=new_table,
-                removed_columns=(ColumnDef("extra", "TEXT", nullable=True),),
-            )),
-        ]),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        removed_columns=(ColumnDef("extra", "TEXT", nullable=True),),
+                    ),
+                ),
+            ]
+        ),
     )
     plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_column=True).build(diff)
     assert len(plan.steps) == 1
@@ -130,31 +151,37 @@ def test_builder_alter_shrink_skipped_without_allow_shrink_column() -> None:
     diff = DiffResult(
         added_tables=OrderedDict(),
         removed_tables=OrderedDict(),
-        modified_tables=OrderedDict([
-            (qualified, TableDiff(
-                old_table=old_table,
-                new_table=new_table,
-                modified_columns=(
-                    (ColumnDef("name", "VARCHAR(500)", nullable=False),
-                     ColumnDef("name", "VARCHAR(255)", nullable=False)),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        modified_columns=(
+                            (
+                                ColumnDef("name", "VARCHAR(500)", nullable=False),
+                                ColumnDef("name", "VARCHAR(255)", nullable=False),
+                            ),
+                        ),
+                    ),
                 ),
-            )),
-        ]),
+            ]
+        ),
     )
+
     # Dialect that would emit ALTER; would_shrink is True (SQLite for VARCHAR 500->255).
     # SQLite alter_column_sql returns None so we need a dialect that returns SQL to test skip.
     class ShrinkCapableDialect(SQLiteDialect):
         def alter_column_sql(self, _table_name, _old_column, _new_column):
             return 'ALTER TABLE "t" ALTER COLUMN "name" VARCHAR(255)'
 
-    plan_no_shrink = SyncPlanBuilder(
-        ShrinkCapableDialect(), allow_shrink_column=False
-    ).build(diff)
+    plan_no_shrink = SyncPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=False).build(diff)
     assert len(plan_no_shrink.steps) == 0
 
-    plan_allow_shrink = SyncPlanBuilder(
-        ShrinkCapableDialect(), allow_shrink_column=True
-    ).build(diff)
+    plan_allow_shrink = SyncPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=True).build(
+        diff
+    )
     assert len(plan_allow_shrink.steps) == 1
     assert "ALTER COLUMN" in (plan_allow_shrink.steps[0].sql or "")
 
@@ -179,12 +206,17 @@ def test_builder_report_extra_tables_false() -> None:
     """When report_extra_tables=False, plan.extra_tables is empty despite removed_tables."""
     diff = DiffResult(
         added_tables=OrderedDict(),
-        removed_tables=OrderedDict([
-            (QualifiedName(None, "orphan"), TableDef(
-                name=QualifiedName(None, "orphan"),
-                columns=(ColumnDef("id", "INTEGER", nullable=False),),
-            )),
-        ]),
+        removed_tables=OrderedDict(
+            [
+                (
+                    QualifiedName(None, "orphan"),
+                    TableDef(
+                        name=QualifiedName(None, "orphan"),
+                        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+                    ),
+                ),
+            ]
+        ),
         modified_tables=OrderedDict(),
     )
     plan = SyncPlanBuilder(SQLiteDialect(), report_extra_tables=False).build(diff)
@@ -192,7 +224,8 @@ def test_builder_report_extra_tables_false() -> None:
 
 
 def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
-    """Modified table with removed index -> DROP INDEX step when allow_drop_constraint=True (default) (01-functional: add/remove constraints)."""
+    """Modified table with removed index -> DROP INDEX when allow_drop_constraint=True (default)
+    (01-functional: add/remove constraints)."""
     from modelsync.schema.diff import TableDiff
 
     qualified = QualifiedName(None, "t")
@@ -209,13 +242,18 @@ def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
     diff = DiffResult(
         added_tables=OrderedDict(),
         removed_tables=OrderedDict(),
-        modified_tables=OrderedDict([
-            (qualified, TableDiff(
-                old_table=old_table,
-                new_table=new_table,
-                removed_indexes=(IndexDef("idx_t_id", ("id",), False),),
-            )),
-        ]),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        removed_indexes=(IndexDef("idx_t_id", ("id",), False),),
+                    ),
+                ),
+            ]
+        ),
     )
     plan = SyncPlanBuilder(SQLiteDialect()).build(diff)  # default allow_drop_constraint=True
     assert len(plan.steps) == 1
@@ -241,13 +279,18 @@ def test_builder_removed_index_no_drop_when_allow_drop_constraint_false() -> Non
     diff = DiffResult(
         added_tables=OrderedDict(),
         removed_tables=OrderedDict(),
-        modified_tables=OrderedDict([
-            (qualified, TableDiff(
-                old_table=old_table,
-                new_table=new_table,
-                removed_indexes=(IndexDef("idx_t_id", ("id",), False),),
-            )),
-        ]),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        removed_indexes=(IndexDef("idx_t_id", ("id",), False),),
+                    ),
+                ),
+            ]
+        ),
     )
     plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_constraint=False).build(diff)
     assert len(plan.steps) == 0
@@ -269,18 +312,22 @@ def test_builder_fk_order_parent_before_child() -> None:
             ColumnDef("id", "INTEGER", nullable=False),
             ColumnDef("parent_id", "INTEGER", nullable=False),
         ),
-        foreign_keys=(ForeignKeyDef(
-            name=None,
-            column_names=("parent_id",),
-            ref_table=parent_name,
-            ref_column_names=("id",),
-        ),),
+        foreign_keys=(
+            ForeignKeyDef(
+                name=None,
+                column_names=("parent_id",),
+                ref_table=parent_name,
+                ref_column_names=("id",),
+            ),
+        ),
     )
     diff = DiffResult(
-        added_tables=OrderedDict([
-            (child_name, child_table),
-            (parent_name, parent_table),
-        ]),
+        added_tables=OrderedDict(
+            [
+                (child_name, child_table),
+                (parent_name, parent_table),
+            ]
+        ),
         removed_tables=OrderedDict(),
         modified_tables=OrderedDict(),
     )

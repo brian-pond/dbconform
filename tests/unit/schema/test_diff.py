@@ -5,7 +5,6 @@ Traceability: docs/requirements/01-functional.md (Plan and DDL order);
 docs/technical/02-architecture.md. Scenarios: added, removed, modified tables.
 """
 
-
 from modelsync.schema.diff import SchemaDiffer, differences
 from modelsync.schema.objects import (
     ColumnDef,

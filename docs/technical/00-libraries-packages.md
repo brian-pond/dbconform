@@ -20,8 +20,7 @@ Single place for modelsync library and package choices: rationale, alternatives,
 ## Optional dependencies (test / backend)
 
 - **`[postgres]`** (pyproject.toml): Used only for running integration tests against PostgreSQL.
-  - **psycopg** ([binary] extra, >=3): PostgreSQL driver for SQLAlchemy (`postgresql+psycopg://`). Chosen over psycopg2 for modern API and maintenance.
-  - **pytest-docker** (>=2): Pytest plugin that starts Docker Compose services (e.g. `tests/docker-compose.yml` Postgres) for the test session; used when `MODELSYNC_TEST_POSTGRES_URL` is not set. See [01-test-database.md](01-test-database.md).
+  - **psycopg** ([binary] extra, >=3): PostgreSQL driver for SQLAlchemy (`postgresql+psycopg://`). Chosen over psycopg2 for modern API and maintenance. See [01-test-database.md](01-test-database.md).
 
 - **`[dev]`** (pyproject.toml): Development and test tooling. **typer** (>=0.9): CLI framework for the `modelsync` script (e.g. `modelsync test run`, `modelsync test postgres up`). See [01-functional](../requirements/01-functional.md) (CLI scope) and [01-test-database.md](01-test-database.md).
 

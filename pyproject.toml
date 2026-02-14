@@ -28,7 +28,6 @@ dev = [
 ]
 postgres = [
     "psycopg[binary]>=3",
-    "pytest-docker>=2",
 ]
 
 [tool.ruff]

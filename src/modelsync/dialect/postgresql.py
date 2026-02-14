@@ -21,32 +21,6 @@ from modelsync.schema.objects import (
 )
 
 
-def _length_from_type_expr(type_expr: str) -> int | None:
-    """Parse VARCHAR(n) or CHAR(n) from type_expr; return n or None."""
-    m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
-    if m:
-        return int(m.group(1))
-    m = re.match(r"CHARACTER\s+VARYING\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
-    if m:
-        return int(m.group(1))
-    m = re.match(r"CHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
-    if m:
-        return int(m.group(1))
-    return None
-
-
-def _pg_type_for_column(column: ColumnDef, pk_autoincrement: bool) -> str:
-    """
-    Return PostgreSQL type for a column (SERIAL/BIGSERIAL for autoincrement PK).
-    """
-    if pk_autoincrement and column.autoincrement:
-        type_upper = column.type_expr.strip().upper()
-        if type_upper in ("BIGINT", "INT8"):
-            return "BIGSERIAL"
-        return "SERIAL"
-    return column.type_expr
-
-
 class PostgreSQLDialect(Dialect):
     """DDL generation for PostgreSQL."""
 
@@ -57,6 +31,33 @@ class PostgreSQLDialect(Dialect):
     def _quote(self, name: str) -> str:
         return f'"{name}"'
 
+    def to_canonical_type_expr(self, type_expr: str) -> str:
+        """
+        Map reflected PostgreSQL type strings to canonical form.
+
+        DOUBLE PRECISION, REAL → FLOAT; CHARACTER VARYING(n), varchar(n) → VARCHAR(n).
+        """
+        t = " ".join(type_expr.split()).strip()
+        u = t.upper()
+        if u == "DOUBLE PRECISION" or u == "REAL":
+            return "FLOAT"
+        m = re.match(r"CHARACTER\s+VARYING\s*\(\s*(\d+)\s*\)", t, re.IGNORECASE)
+        if m:
+            return f"VARCHAR({m.group(1)})"
+        m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", t, re.IGNORECASE)
+        if m:
+            return f"VARCHAR({m.group(1)})"
+        return t
+
+    def to_ddl_type(self, column: ColumnDef, *, pk_autoincrement: bool = False) -> str:
+        """PostgreSQL: SERIAL/BIGSERIAL for autoincrement PK; else column.type_expr."""
+        if pk_autoincrement and column.autoincrement:
+            type_upper = column.type_expr.strip().upper()
+            if type_upper in ("BIGINT", "INT8"):
+                return "BIGSERIAL"
+            return "SERIAL"
+        return column.type_expr
+
     def create_table_sql(self, table: TableDef) -> str:
         """Generate CREATE TABLE with columns and table-level constraints."""
         parts: list[str] = []
@@ -64,14 +65,11 @@ class PostgreSQLDialect(Dialect):
             table.primary_key
             and len(table.primary_key.column_names) == 1
             and any(
-                c.autoincrement and c.name in table.primary_key.column_names
-                for c in table.columns
+                c.autoincrement and c.name in table.primary_key.column_names for c in table.columns
             )
         )
         for col in table.columns:
-            pg_type = _pg_type_for_column(
-                col, pk_autoincrement=bool(pk_inline and table.primary_key)
-            )
+            pg_type = self.to_ddl_type(col, pk_autoincrement=bool(pk_inline and table.primary_key))
             seg = f"{self._quote(col.name)} {pg_type}"
             if pg_type not in ("SERIAL", "BIGSERIAL") and not col.nullable:
                 seg += " NOT NULL"
@@ -102,7 +100,8 @@ class PostgreSQLDialect(Dialect):
 
     def add_column_sql(self, table_name: QualifiedName, column: ColumnDef) -> str:
         """PostgreSQL supports ALTER TABLE ... ADD COLUMN."""
-        seg = f"{self._quote(column.name)} {column.type_expr}"
+        pg_type = self.to_ddl_type(column)
+        seg = f"{self._quote(column.name)} {pg_type}"
         if not column.nullable:
             seg += " NOT NULL"
         if column.default is not None:
@@ -115,13 +114,9 @@ class PostgreSQLDialect(Dialect):
         new_column: ColumnDef,
     ) -> bool:
         """True if new column has a smaller length than old (VARCHAR/CHAR)."""
-        old_len = _length_from_type_expr(old_column.type_expr)
-        new_len = _length_from_type_expr(new_column.type_expr)
-        return (
-            old_len is not None
-            and new_len is not None
-            and new_len < old_len
-        )
+        old_len = self._parse_varchar_length(old_column.type_expr)
+        new_len = self._parse_varchar_length(new_column.type_expr)
+        return old_len is not None and new_len is not None and new_len < old_len
 
     def alter_column_sql(
         self,
@@ -134,7 +129,8 @@ class PostgreSQLDialect(Dialect):
         qcol = self._quote(new_column.name)
         stmts: list[str] = []
         if old_column.type_expr != new_column.type_expr:
-            stmts.append(f'ALTER TABLE {tbl} ALTER COLUMN {qcol} TYPE {new_column.type_expr}')
+            ddl_type = self.to_ddl_type(new_column)
+            stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} TYPE {ddl_type}")
         if old_column.nullable != new_column.nullable:
             if new_column.nullable:
                 stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} DROP NOT NULL")
@@ -144,7 +140,9 @@ class PostgreSQLDialect(Dialect):
             if new_column.default is None:
                 stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} DROP DEFAULT")
             else:
-                stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} SET DEFAULT {new_column.default}")
+                stmts.append(
+                    f"ALTER TABLE {tbl} ALTER COLUMN {qcol} SET DEFAULT {new_column.default}"
+                )
         if not stmts:
             return None
         return "; ".join(stmts)
@@ -165,8 +163,7 @@ class PostgreSQLDialect(Dialect):
     ) -> str | None:
         """PostgreSQL supports ALTER TABLE ... DROP COLUMN."""
         return (
-            f"ALTER TABLE {self.qualified_table(table_name)} "
-            f'DROP COLUMN {self._quote(column_name)}'
+            f"ALTER TABLE {self.qualified_table(table_name)} DROP COLUMN {self._quote(column_name)}"
         )
 
     def drop_table_sql(self, table_name: QualifiedName) -> str:
@@ -213,7 +210,9 @@ class PostgreSQLDialect(Dialect):
     ) -> str:
         """PostgreSQL: DROP INDEX; schema-qualify when table has schema."""
         if table_name.schema:
-            return f'DROP INDEX IF EXISTS {self._quote(table_name.schema)}.{self._quote(index_name)}'
+            schema_q = self._quote(table_name.schema)
+            idx_q = self._quote(index_name)
+            return f"DROP INDEX IF EXISTS {schema_q}.{idx_q}"
         return f"DROP INDEX IF EXISTS {self._quote(index_name)}"
 
     def create_index_sql(
@@ -226,3 +225,57 @@ class PostgreSQLDialect(Dialect):
         cols = ", ".join(self._quote(c) for c in index.column_names)
         tbl = self.qualified_table(table_name)
         return f"CREATE {uniq}INDEX {self._quote(index.name)} ON {tbl} ({cols})"
+
+    def normalize_reflected_table(self, table_def: TableDef) -> TableDef:
+        """
+        Normalize reflected table so SERIAL/sequence columns compare equal to model.
+
+        Columns with a sequence default (nextval) and integer-like type are rewritten
+        to default=None, autoincrement=True, type_expr=INTEGER|BIGINT so they match
+        the model's representation and no spurious ALTER steps are emitted.
+        """
+        INTEGER_LIKE = ("SERIAL", "INTEGER", "BIGSERIAL", "BIGINT", "INT8")
+        new_columns: list[ColumnDef] = []
+        for col in table_def.columns:
+            if (
+                col.default is not None
+                and "nextval" in col.default
+                and col.type_expr.strip().upper() in INTEGER_LIKE
+            ):
+                type_upper = col.type_expr.strip().upper()
+                canonical_type = (
+                    "BIGINT" if type_upper in ("BIGSERIAL", "BIGINT", "INT8") else "INTEGER"
+                )
+                new_columns.append(
+                    ColumnDef(
+                        name=col.name,
+                        type_expr=canonical_type,
+                        nullable=col.nullable,
+                        default=None,
+                        comment=col.comment,
+                        autoincrement=True,
+                    )
+                )
+            else:
+                canonical_type = self.to_canonical_type_expr(col.type_expr)
+                # Non-SERIAL columns must not have autoincrement=True from reflection noise.
+                new_columns.append(
+                    ColumnDef(
+                        name=col.name,
+                        type_expr=canonical_type,
+                        nullable=col.nullable,
+                        default=col.default,
+                        comment=col.comment,
+                        autoincrement=False,
+                    )
+                )
+        return TableDef(
+            name=table_def.name,
+            columns=tuple(new_columns),
+            primary_key=table_def.primary_key,
+            unique_constraints=table_def.unique_constraints,
+            foreign_keys=table_def.foreign_keys,
+            check_constraints=table_def.check_constraints,
+            indexes=table_def.indexes,
+            comment=table_def.comment,
+        )

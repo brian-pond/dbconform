@@ -71,7 +71,8 @@ def test_extra_table_reported_no_drop_recompare_still_extra(
 def test_extra_table_dropped_when_allow_drop_table(
     empty_db: tuple[str, str | None],
 ) -> None:
-    """Extra table in DB; compare(allow_drop_table=True) has DROP; do_sync drops it; recompare 0 extra (01-functional: Opt-in flags)."""
+    """Extra table in DB; compare(allow_drop_table=True) has DROP; do_sync drops it;
+    recompare 0 extra (01-functional: Opt-in flags)."""
     url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:

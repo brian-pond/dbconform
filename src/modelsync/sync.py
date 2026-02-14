@@ -181,6 +181,7 @@ class ModelSync:
                 models,
                 dialect=connection.dialect,
                 target_schema=self._target_schema,
+                schema_normalizer=dialect,
             )
             db_schema = DatabaseSchema.from_connection(connection, self._target_schema)
             differ = SchemaDiffer()

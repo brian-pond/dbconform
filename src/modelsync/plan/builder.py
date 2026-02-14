@@ -96,9 +96,7 @@ class SyncPlanBuilder:
 
         # Drop tables first (dependents before refs): reverse of create order.
         if self.allow_drop_table and diff.removed_tables:
-            drop_order = list(
-                reversed(_topological_table_order(diff.removed_tables))
-            )
+            drop_order = list(reversed(_topological_table_order(diff.removed_tables)))
             for name in drop_order:
                 if name not in diff.removed_tables:
                     continue

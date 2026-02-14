@@ -8,6 +8,7 @@ and CREATE/ALTER statements. See docs/requirements/01-functional.md
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 
 from modelsync.schema.objects import (
@@ -124,8 +125,7 @@ class Dialect(ABC):
         name_part = f"CONSTRAINT {self._quote(fk.name)} " if fk.name else ""
         tbl = self.qualified_table(table_name)
         return (
-            f"ALTER TABLE {tbl} ADD {name_part}FOREIGN KEY ({cols}) "
-            f"REFERENCES {ref} ({ref_cols})"
+            f"ALTER TABLE {tbl} ADD {name_part}FOREIGN KEY ({cols}) REFERENCES {ref} ({ref_cols})"
         )
 
     def add_check_sql(
@@ -189,8 +189,51 @@ class Dialect(ABC):
     def drop_index_sql(
         self,
         index_name: str,
-        table_name: QualifiedName,
+        table_name: QualifiedName,  # noqa: ARG002
     ) -> str:
         """Generate DROP INDEX."""
-        tbl = self.qualified_table(table_name)
         return f"DROP INDEX IF EXISTS {self._quote(index_name)}"
+
+    def to_canonical_type_expr(self, type_expr: str) -> str:
+        """
+        Map a platform or SQLAlchemy-compiled type string to canonical form.
+
+        Default: return unchanged. Override in backends that need normalization
+        (e.g. PostgreSQL: DOUBLE PRECISION → FLOAT, CHARACTER VARYING(n) → VARCHAR(n)).
+        """
+        return type_expr
+
+    def to_ddl_type(self, column: ColumnDef, *, pk_autoincrement: bool = False) -> str:  # noqa: ARG002
+        """
+        Return the platform-specific DDL type string for a column.
+
+        Default: return column.type_expr. Override for backends that use
+        different DDL (e.g. PostgreSQL: INTEGER + autoincrement PK → SERIAL).
+        """
+        return column.type_expr
+
+    def _parse_varchar_length(self, type_expr: str) -> int | None:
+        """
+        Parse VARCHAR(n) or CHAR(n) from a type string; return n or None.
+
+        Shared by dialects for would_shrink and type normalization.
+        """
+        m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+        m = re.match(r"CHARACTER\s+VARYING\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+        m = re.match(r"CHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+        return None
+
+    def normalize_reflected_table(self, table_def: TableDef) -> TableDef:
+        """
+        Optionally normalize a reflected TableDef so it compares equal to model schema.
+
+        Default: return table_def unchanged. PostgreSQL overrides to normalize
+        SERIAL/sequence columns (nextval default → default=None, autoincrement=True).
+        """
+        return table_def

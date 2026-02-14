@@ -7,8 +7,6 @@ See docs/requirements/01-functional.md (Schema parity scope).
 
 from __future__ import annotations
 
-import re
-
 from modelsync.dialect.base import Dialect
 from modelsync.schema.objects import (
     CheckDef,
@@ -18,17 +16,6 @@ from modelsync.schema.objects import (
     TableDef,
     UniqueDef,
 )
-
-
-def _length_from_type_expr(type_expr: str) -> int | None:
-    """Parse VARCHAR(n) or CHAR(n) from type_expr; return n or None."""
-    m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
-    if m:
-        return int(m.group(1))
-    m = re.match(r"CHAR\s*\(\s*(\d+)\s*\)", type_expr, re.IGNORECASE)
-    if m:
-        return int(m.group(1))
-    return None
 
 
 class SQLiteDialect(Dialect):
@@ -48,8 +35,7 @@ class SQLiteDialect(Dialect):
             table.primary_key
             and len(table.primary_key.column_names) == 1
             and any(
-                c.autoincrement and c.name in table.primary_key.column_names
-                for c in table.columns
+                c.autoincrement and c.name in table.primary_key.column_names for c in table.columns
             )
         )
         for col in table.columns:
@@ -96,13 +82,9 @@ class SQLiteDialect(Dialect):
         new_column: ColumnDef,
     ) -> bool:
         """True if new column has a smaller length than old (VARCHAR/CHAR)."""
-        old_len = _length_from_type_expr(old_column.type_expr)
-        new_len = _length_from_type_expr(new_column.type_expr)
-        return (
-            old_len is not None
-            and new_len is not None
-            and new_len < old_len
-        )
+        old_len = self._parse_varchar_length(old_column.type_expr)
+        new_len = self._parse_varchar_length(new_column.type_expr)
+        return old_len is not None and new_len is not None and new_len < old_len
 
     def alter_column_sql(
         self,
@@ -128,8 +110,7 @@ class SQLiteDialect(Dialect):
     ) -> str | None:
         """SQLite 3.35+ supports ALTER TABLE ... DROP COLUMN."""
         return (
-            f"ALTER TABLE {self.qualified_table(table_name)} "
-            f'DROP COLUMN {self._quote(column_name)}'
+            f"ALTER TABLE {self.qualified_table(table_name)} DROP COLUMN {self._quote(column_name)}"
         )
 
     def drop_table_sql(self, table_name: QualifiedName) -> str:

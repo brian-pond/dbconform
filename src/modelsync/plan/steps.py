@@ -43,9 +43,7 @@ class CreateTableStep(SyncStep):
 class AlterTableStep(SyncStep):
     """Alter a table (add/alter column, add constraint, etc.)."""
 
-    table_name: QualifiedName = field(
-        default_factory=lambda: QualifiedName(schema=None, name="")
-    )
+    table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
     # When adding a column:
     column: ColumnDef | None = None
     # When adding unique/check:
@@ -59,18 +57,14 @@ class CreateIndexStep(SyncStep):
     index: IndexDef = field(
         default_factory=lambda: IndexDef(name="", column_names=(), unique=False)
     )
-    table_name: QualifiedName = field(
-        default_factory=lambda: QualifiedName(schema=None, name="")
-    )
+    table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
 
 
 @dataclass
 class DropTableStep(SyncStep):
     """Drop a table. Emitted only when allow_drop_table=True (01-functional: Opt-in flags)."""
 
-    table_name: QualifiedName = field(
-        default_factory=lambda: QualifiedName(schema=None, name="")
-    )
+    table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
 
 
 @dataclass
@@ -90,14 +84,8 @@ class SyncPlan:
 
     def sql(self) -> str:
         """Return concatenated SQL of all steps (one statement per line)."""
-        return "\n".join(
-            s.sql for s in self.steps if s.sql is not None and s.sql.strip()
-        )
+        return "\n".join(s.sql for s in self.steps if s.sql is not None and s.sql.strip())
 
     def statements(self) -> list[str]:
         """Return list of SQL statements."""
-        return [
-            s.sql
-            for s in self.steps
-            if s.sql is not None and s.sql.strip()
-        ]
+        return [s.sql for s in self.steps if s.sql is not None and s.sql.strip()]
