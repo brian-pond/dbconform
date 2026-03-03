@@ -28,6 +28,20 @@ class SQLiteDialect(Dialect):
     def _quote(self, name: str) -> str:
         return f'"{name}"'
 
+    def default_for_ddl(self, default_expr: str) -> str:
+        """
+        Translate PostgreSQL-style defaults to SQLite equivalents.
+
+        SQLite DEFAULT only accepts CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME
+        (no function calls like now()). Map now() and localtimestamp to CURRENT_TIMESTAMP.
+        """
+        normalized = default_expr.strip().lower()
+        if normalized in ("now()", "localtimestamp", "localtimestamp()"):
+            return "CURRENT_TIMESTAMP"
+        if normalized in ("current_timestamp", "current_date", "current_time"):
+            return default_expr.strip().upper()
+        return default_expr
+
     def create_table_sql(self, table: TableDef) -> str:
         """Generate CREATE TABLE with columns and table-level constraints."""
         parts: list[str] = []
@@ -41,7 +55,7 @@ class SQLiteDialect(Dialect):
             if not col.nullable:
                 seg += " NOT NULL"
             if col.default is not None:
-                seg += f" DEFAULT {col.default}"
+                seg += f" DEFAULT {self.default_for_ddl(col.default)}"
             if pk_inline and table.primary_key and col.name in table.primary_key.column_names:
                 seg += " PRIMARY KEY AUTOINCREMENT"
             parts.append(seg)
@@ -71,7 +85,7 @@ class SQLiteDialect(Dialect):
         if not column.nullable:
             seg += " NOT NULL"
         if column.default is not None:
-            seg += f" DEFAULT {column.default}"
+            seg += f" DEFAULT {self.default_for_ddl(column.default)}"
         return f"ALTER TABLE {self.qualified_table(table_name)} ADD COLUMN {seg}"
 
     def would_shrink(

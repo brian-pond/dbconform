@@ -201,6 +201,15 @@ class Dialect(ABC):
         """
         return reflected_type
 
+    def default_for_ddl(self, default_expr: str) -> str:
+        """
+        Return the default expression for DDL in this dialect.
+
+        Default: return unchanged. Override for backends that need to translate
+        expressions from other dialects (e.g. SQLite: now() → CURRENT_TIMESTAMP).
+        """
+        return default_expr
+
     def to_ddl_type(self, column: ColumnDef, *, pk_autoincrement: bool = False) -> str:  # noqa: ARG002
         """
         Return the platform-specific DDL type string for a column.

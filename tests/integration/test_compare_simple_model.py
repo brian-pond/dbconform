@@ -7,13 +7,27 @@ Database connection, compare() / apply_changes(). Acceptance: schema (create tab
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.sql import func
+from sqlmodel import Field, SQLModel
 
 import dbconform
 from tests.shared_models import SimpleTable, SimpleTableWithIndex, SimpleTableWithUnique
+
+
+class AuditLogWithNowDefault(SQLModel, table=True):
+    """Model with server_default=func.now() — PostgreSQL style; SQLite needs CURRENT_TIMESTAMP."""
+
+    __tablename__ = "audit_logs_now_default"
+
+    id: int | None = Field(default=None, primary_key=True)
+    occurred_at: datetime = Field(
+        sa_column_kwargs={"server_default": func.now(), "nullable": False},
+    )
 
 
 def test_empty_sqlite_db_fixture(empty_sqlite_db: tuple[Path, str]) -> None:
@@ -137,6 +151,19 @@ def test_apply_changes_applies_plan_then_recompare_parity(empty_db: tuple[str, s
     recompare = conform.compare(SimpleTable)
     assert not isinstance(recompare, dbconform.ConformError)
     assert len(recompare.steps) == 0
+
+
+def test_apply_changes_func_now_default_sqlite_compatible(
+    empty_sqlite_db: tuple[Path, str],
+) -> None:
+    """Model with server_default=func.now(); SQLite dialect emits CURRENT_TIMESTAMP (not now())."""
+    _path, url = empty_sqlite_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    result = conform.apply_changes(AuditLogWithNowDefault)
+    assert not isinstance(result, dbconform.ConformError), str(result)
+    sql = result.sql()
+    assert "DEFAULT CURRENT_TIMESTAMP" in sql
+    assert " DEFAULT now()" not in sql and "DEFAULT now()" not in sql
 
 
 def test_compare_invalid_model_returns_conform_error(empty_db: tuple[str, str | None]) -> None:
