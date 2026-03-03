@@ -6,68 +6,43 @@ A Python library to conform database schema to models: keep your database schema
 
 - Python 3.11+
 
-## Setup
-
-Create a virtual environment and install the package in editable mode:
+## Installing from PyPI
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate   # Linux/macOS
-# .venv\Scripts\activate   # Windows
-pip install -e ".[dev]"
+pip install dbconform
 ```
 
-## Installing in other projects
+Optional extras:
 
-To use dbconform in another Python application:
-
-- **Development (same machine):** From your other project, run `pip install -e /path/to/dbconform` or `uv pip install -e /path/to/dbconform`. Changes in the dbconform repo are reflected immediately.
-- **Built wheel:** From the dbconform repo run `uv build` (requires `uv` and dev deps: `pip install -e ".[dev]"`). This produces a wheel in `dist/` (e.g. `dist/dbconform-0.1.0-py3-none-any.whl`). In your other project: `pip install /path/to/dbconform/dist/dbconform-0.1.0-py3-none-any.whl`.
-- **Private index:** Upload the contents of `dist/` to your index; then `pip install dbconform --index-url https://your-index/simple/`.
-
-## Running tests
-
-From the project root, with the virtual environment activated:
+- **`[postgres]`** — PostgreSQL driver (psycopg) for connecting to PostgreSQL
+- **`[async]`** — Async drivers (aiosqlite, asyncpg) for `AsyncDbConform`
 
 ```bash
-pytest tests/
+pip install dbconform[postgres]       # PostgreSQL support
+pip install dbconform[async]          # Async (SQLite + PostgreSQL)
+pip install dbconform[async,postgres] # Both
 ```
-
-Run only unit tests or only integration tests:
-
-```bash
-pytest tests/unit/
-pytest tests/integration/
-```
-
-See `tests/TESTS_README.md` for how tests are organized.
 
 ## Usage
 
-Use dbconform as a library: define your models (e.g. SQLAlchemy or SQLModel), then compare them to the database. By default, only a plan is produced; apply only when you explicitly opt in.
+Use dbconform as a library: define your models (SQLAlchemy or SQLModel), then compare them to the database. By default, only a plan is produced; apply only when you explicitly opt in.
 
-### DbConform: the three main entry points
+### Quick start
 
-**1. `DbConform(...)` — set up the connection**
+**1. Create a `DbConform` instance** — pass either credentials (dbconform manages the connection) or your own connection:
 
-Create a `DbConform` instance by passing either:
+- **`credentials={"url": "sqlite:///./mydb.sqlite"}`** — dbconform opens the database, runs your call, then closes it.
+- **`connection=engine.connect()`** — you provide an open connection and close it when done.
 
-- **`credentials={"url": "sqlite:///./mydb.sqlite"}`** — dbconform will open the database, run your call, then close it. No need to manage the connection yourself.
-- **`connection=engine.connect()`** — you provide an open connection; you are responsible for closing it when done.
+For PostgreSQL, also pass **`target_schema="public"`** (or your schema name). For SQLite you can omit it.
 
-For databases that use schemas (e.g. PostgreSQL), also pass **`target_schema="public"`** (or your schema name). For SQLite you can omit it.
+**2. `compare(models)`** — dry run: returns a plan of steps (create table, add column, etc.) without executing anything. Use `result.sql()` to get the DDL script.
 
-**2. `compare(models)` — see what would change (dry run)**
-
-Pass one model class or a list of model classes. dbconform compares their combined schema to the live database and returns a **plan** of steps (create table, add column, add constraint, etc.) without executing anything. Use this to inspect changes, log them, or generate a DDL script with `plan.sql()`. Returns a `ConformPlan` or a `ConformError` if something went wrong.
-
-**3. `apply_changes(models)` — apply the changes**
-
-Same comparison as `compare()`, but **runs** the plan against the database. By default all steps run in one transaction: if any step fails, everything is rolled back. Returns the applied `ConformPlan` on success or a `ConformError` on failure. Optional: `commit_per_step=True` to commit after each step (partial progress on failure), or `log_file="path"` to append applied steps to a file.
+**3. `apply_changes(models)`** — same as compare, but runs the plan against the database. All-or-nothing by default; rollback on failure.
 
 ---
 
-Define one or more models and pass them (single class or a list) to `compare()` or `apply_changes()`. The example below uses `compare()` to get a plan.
+Define your models and pass them (one class or a list) to `compare()` or `apply_changes()`.
 
 ```python
 from sqlalchemy import Column, Float, ForeignKey, Integer, String
@@ -75,6 +50,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from dbconform import DbConform, ConformError
 
+# Define your models (SQLAlchemy or SQLModel)
 class Product(DeclarativeBase):
     __tablename__ = "product"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -87,21 +63,22 @@ class Cart(DeclarativeBase):
     product_id = Column(Integer, ForeignKey("product.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
 
+# Compare: get a plan without applying
 conform = DbConform(credentials={"url": "sqlite:///./mydb.sqlite"})
-result_plan = conform.compare([Product, Cart])
+result = conform.compare([Product, Cart])
 
-if isinstance(result_plan, ConformError):
-    print("Compare failed:", result_plan.messages)
+if isinstance(result, ConformError):
+    print("Compare failed:", result.messages)
 else:
-    if not result_plan.steps:
-        print("Your target database is up to date.")
+    if not result.steps:
+        print("Database is up to date.")
     else:
-        for step in result_plan.steps:
+        for step in result.steps:
             print(step)
-        # result_plan.sql() returns the full DDL script for inspection or manual execution
+        print(result.sql())  # Full DDL script
 ```
 
-**Using your own connection** — you open the connection and close it yourself:
+**Using your own connection** — you manage the connection lifecycle:
 
 ```python
 from sqlalchemy import create_engine
@@ -109,44 +86,85 @@ from sqlalchemy import create_engine
 engine = create_engine("sqlite:///./mydb.sqlite")
 with engine.connect() as conn:
     conform = DbConform(connection=conn)
-    result_plan = conform.compare([Product, Cart])
+    result = conform.compare([Product, Cart])
 engine.dispose()
 ```
 
-### Possible Outcomes
-
-#### Scenario 1
-If the target database is empty, printing each step might show:
-
-```
-Create table product
-Create table cart
-```
-
-#### Scenario 2
-If the database already matches your models, you'll see *Your target database is up to date.* and no steps.
-
-#### Scenario 3
-What if `cart` already exists in the database but is missing the `quantity` column? Then you might see:
-
-```
-Add column quantity to cart
-```
-
-To get the full DDL script as a single string, use `result_plan.sql()`.
-
-### Applying the plan with apply_changes()
-
-To compare and apply the plan in one go (run the DDL against the database), use `apply_changes()`. It uses the same comparison as `compare()` but executes the steps in a single transaction (all-or-nothing; rollback on failure). Returns the applied `ConformPlan` on success or `ConformError` on failure.
+**Async usage** — use `AsyncDbConform` with async driver URLs (`sqlite+aiosqlite://`, `postgresql+asyncpg://`). Install the `[async]` extra: `pip install dbconform[async]`.
 
 ```python
-result_plan = conform.apply_changes([Product, Cart])
+import asyncio
+from sqlalchemy.ext.asyncio import create_async_engine
 
-if isinstance(result_plan, ConformError):
-    print("Conform failed:", result_plan.messages)
-else:
-    print(f"Applied {len(result_plan.steps)} step(s). Schema is now conformant.")
+from dbconform import AsyncDbConform, ConformError
+
+async def main():
+    engine = create_async_engine("sqlite+aiosqlite:///./mydb.sqlite")
+    async with engine.connect() as conn:
+        conform = AsyncDbConform(async_connection=conn)
+        result = await conform.compare([Product, Cart])  # same models as above
+    await engine.dispose()
+    if isinstance(result, ConformError):
+        print("Compare failed:", result.messages)
+    else:
+        print(f"Plan has {len(result.steps)} step(s)")
+
+asyncio.run(main())
 ```
 
-Optional: `apply_changes(..., commit_per_step=True)` commits after each step so partial progress is kept if a later step fails. `apply_changes(..., log_file="/path/to/conform.log")` appends applied steps as JSON lines to a file.
+### Example outputs
 
+- **Empty database:** `compare()` might show steps like `Create table product`, `Create table cart`.
+- **Schema matches:** `result.steps` is empty; your database is up to date.
+- **Missing column:** If `cart` exists but lacks `quantity`, you might see `Add column quantity to cart`.
+
+Use `result.sql()` to get the full DDL script as a single string.
+
+### Applying changes
+
+To compare and apply in one call, use `apply_changes()`. Same comparison as `compare()`, but it executes the DDL. (For async, use `await conform.apply_changes(...)`.)
+
+```python
+result = conform.apply_changes([Product, Cart])
+
+if isinstance(result, ConformError):
+    print("Apply failed:", result.messages)
+else:
+    print(f"Applied {len(result.steps)} step(s). Schema is conformant.")
+```
+
+Options: `commit_per_step=True` commits after each step (partial progress on failure); `log_file="path"` appends applied steps as JSON lines to a file.
+
+
+## For Developers
+
+
+### Local Installation
+Create a virtual environment and install the package in editable mode:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Linux/macOS
+# .venv\Scripts\activate   # Windows
+pip install -e ".[dev, async, postgres]"
+```
+
+### Running tests
+
+From the project root:
+
+```bash
+dbconform test run
+```
+
+With the `[postgres]` extra and Docker or Podman, this starts a Postgres container, runs the full suite (SQLite + PostgreSQL), then stops it. Without Postgres, only SQLite tests run.
+
+Other commands: `dbconform test check-container` (verify Docker/Podman), `dbconform test postgres up` / `dbconform test postgres down` (manual container lifecycle). See `tests/TESTS_README.md` for test organization.
+
+### Installing in other projects
+
+To use dbconform in another Python application:
+
+- **Development (same machine):** From your other project, run `pip install -e /path/to/dbconform` or `uv pip install -e /path/to/dbconform`. Changes in the dbconform repo are reflected immediately.
+- **Built wheel:** From the dbconform repo run `uv build` (requires `uv` and dev deps: `pip install -e ".[dev]"`). This produces a wheel in `dist/` (e.g. `dist/dbconform-0.1.0-py3-none-any.whl`). In your other project: `pip install /path/to/dbconform/dist/dbconform-0.1.0-py3-none-any.whl`.
+- **Private index:** Upload the contents of `dist/` to your index; then `pip install dbconform --index-url https://your-index/simple/`.

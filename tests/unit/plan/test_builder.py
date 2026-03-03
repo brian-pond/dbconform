@@ -179,9 +179,7 @@ def test_builder_alter_shrink_skipped_without_allow_shrink_column() -> None:
     plan_no_shrink = ConformPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=False).build(diff)
     assert len(plan_no_shrink.steps) == 0
 
-    plan_allow_shrink = ConformPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=True).build(
-        diff
-    )
+    plan_allow_shrink = ConformPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=True).build(diff)
     assert len(plan_allow_shrink.steps) == 1
     assert "ALTER COLUMN" in (plan_allow_shrink.steps[0].sql or "")
 

@@ -34,9 +34,7 @@ class SQLiteDialect(Dialect):
         pk_inline = (
             table.primary_key
             and len(table.primary_key.column_names) == 1
-            and any(
-                c.autoincrement and c.name in table.primary_key.column_names for c in table.columns
-            )
+            and any(c.autoincrement and c.name in table.primary_key.column_names for c in table.columns)
         )
         for col in table.columns:
             seg = f"{self._quote(col.name)} {col.data_type_name}"
@@ -109,9 +107,7 @@ class SQLiteDialect(Dialect):
         column_name: str,
     ) -> str | None:
         """SQLite 3.35+ supports ALTER TABLE ... DROP COLUMN."""
-        return (
-            f"ALTER TABLE {self.qualified_table(table_name)} DROP COLUMN {self._quote(column_name)}"
-        )
+        return f"ALTER TABLE {self.qualified_table(table_name)} DROP COLUMN {self._quote(column_name)}"
 
     def drop_table_sql(self, table_name: QualifiedName) -> str:
         """Generate DROP TABLE for SQLite."""

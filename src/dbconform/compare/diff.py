@@ -132,9 +132,7 @@ def _diff_columns(
 ) -> tuple[list[ColumnDef], list[ColumnDef], list[tuple[ColumnDef, ColumnDef]]]:
     added = [new_cols[k] for k in new_cols if k not in old_cols]
     removed = [old_cols[k] for k in old_cols if k not in new_cols]
-    modified = [
-        (old_cols[k], new_cols[k]) for k in old_cols if k in new_cols and old_cols[k] != new_cols[k]
-    ]
+    modified = [(old_cols[k], new_cols[k]) for k in old_cols if k in new_cols and old_cols[k] != new_cols[k]]
     return added, removed, modified
 
 

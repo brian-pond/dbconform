@@ -55,9 +55,7 @@ class AlterTableStep(ConformStep):
 class CreateIndexStep(ConformStep):
     """Create an index."""
 
-    index: IndexDef = field(
-        default_factory=lambda: IndexDef(name="", column_names=(), unique=False)
-    )
+    index: IndexDef = field(default_factory=lambda: IndexDef(name="", column_names=(), unique=False))
     table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
 
 

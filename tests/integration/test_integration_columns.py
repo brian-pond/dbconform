@@ -63,9 +63,7 @@ def test_multiple_columns_missing_in_db_apply_changes_then_parity(
     url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
-        conn.execute(
-            text("CREATE TABLE simple_table (id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL)")
-        )
+        conn.execute(text("CREATE TABLE simple_table (id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL)"))
         conn.commit()
     engine.dispose()
 

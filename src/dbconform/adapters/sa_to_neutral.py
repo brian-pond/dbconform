@@ -67,6 +67,7 @@ def sa_column_to_neutral_type(column: Any) -> str:
     # so we don't fail on custom or rare types. Use SQLite as a simple dialect.
     try:
         from sqlalchemy.dialects import sqlite
+
         compiled = typ.compile(dialect=sqlite.dialect())
         # Normalize common SQLite outputs to neutral
         c = str(compiled).strip().upper()

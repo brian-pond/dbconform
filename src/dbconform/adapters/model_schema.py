@@ -75,15 +75,8 @@ def _extract_table_def(
 
     columns: list[ColumnDef] = []
     # Only the single integer PK column should have autoincrement=True (SA uses "auto" on others too).
-    is_single_pk = (
-        table.primary_key
-        and len(table.primary_key.columns) == 1
-    )
-    pk_col_name = (
-        list(table.primary_key.columns)[0].name
-        if is_single_pk
-        else None
-    )
+    is_single_pk = table.primary_key and len(table.primary_key.columns) == 1
+    pk_col_name = list(table.primary_key.columns)[0].name if is_single_pk else None
     _integer_type_names = ("Integer", "INTEGER", "BigInteger", "BIGINT", "SmallInteger", "SMALLINT")
     for col in table.c:
         default = _default_expr(col, dialect)
@@ -94,9 +87,7 @@ def _extract_table_def(
             sa_auto = sa_auto == "auto"
         is_pk_col = pk_col_name is not None and col.name == pk_col_name
         is_integer = type(col.type).__name__ in _integer_type_names
-        autoincrement = bool(
-            is_single_pk and is_pk_col and is_integer and sa_auto
-        )
+        autoincrement = bool(is_single_pk and is_pk_col and is_integer and sa_auto)
         columns.append(
             ColumnDef(
                 name=col.name,

@@ -40,9 +40,7 @@ def test_empty_postgres_db_fixture(empty_postgres_db: tuple[str, str]) -> None:
     assert schema == "public"
     engine = create_engine(url)
     with engine.connect() as conn:
-        conn.execute(
-            text("CREATE TABLE t (id SERIAL PRIMARY KEY)")
-        )
+        conn.execute(text("CREATE TABLE t (id SERIAL PRIMARY KEY)"))
         conn.commit()
         result = conn.execute(
             text(
@@ -199,9 +197,7 @@ def test_apply_changes_apply_failure_returns_conform_error_with_target_objects_p
                 "value DOUBLE PRECISION NOT NULL, count INTEGER NOT NULL)"
             )
         )
-        conn.execute(
-            text("INSERT INTO simple_table (name, value, count) VALUES (NULL, 1.0, 0)")
-        )
+        conn.execute(text("INSERT INTO simple_table (name, value, count) VALUES (NULL, 1.0, 0)"))
         conn.commit()
     engine.dispose()
 

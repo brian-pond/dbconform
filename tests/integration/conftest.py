@@ -21,6 +21,24 @@ def _normalize_postgres_url(url: str) -> str:
     return url
 
 
+def _sync_url_to_async_url(url: str) -> str:
+    """
+    Convert sync database URL to async driver URL.
+
+    sqlite:///path -> sqlite+aiosqlite:///path
+    postgresql://... or postgresql+psycopg://... -> postgresql+asyncpg://...
+    """
+    parsed = make_url(url)
+    if parsed.drivername.startswith("sqlite"):
+        return str(parsed.set(drivername="sqlite+aiosqlite"))
+    if "postgresql" in parsed.drivername:
+        base = parsed.drivername.split("+")[0]
+        async_url = parsed.set(drivername=f"{base}+asyncpg")
+        # SQLAlchemy's URL.__str__ masks password as ***; render_as_string preserves it.
+        return async_url.render_as_string(hide_password=False)
+    return url
+
+
 @pytest.fixture
 def empty_sqlite_db(tmp_path: Path) -> tuple[Path, str]:
     """
@@ -125,3 +143,37 @@ def empty_db(request: pytest.FixtureRequest) -> tuple[str, str | None]:
     else:
         url, schema = request.getfixturevalue("empty_postgres_db")
         yield (url, schema)
+
+
+def _skip_if_async_driver_unavailable(drivername: str) -> None:
+    """Skip test if the async driver for the given dialect is not installed."""
+    if "sqlite" in drivername:
+        try:
+            import aiosqlite  # noqa: F401
+        except ImportError:
+            pytest.skip("aiosqlite not installed; install [async] extra")
+    if "postgresql" in drivername:
+        try:
+            import asyncpg  # noqa: F401
+        except ImportError:
+            pytest.skip("asyncpg not installed; install [async] extra")
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def empty_db_async(request: pytest.FixtureRequest) -> tuple[str, str | None]:
+    """
+    Parametrized fixture for async tests: yields (async_url, target_schema).
+
+    Uses _sync_url_to_async_url on empty_sqlite_db / empty_postgres_db URLs.
+    Skips when aiosqlite (sqlite) or asyncpg (postgres) is not installed.
+    """
+    if request.param == "sqlite":
+        _path, url = request.getfixturevalue("empty_sqlite_db")
+        _skip_if_async_driver_unavailable("sqlite")
+        async_url = _sync_url_to_async_url(url)
+        yield (async_url, None)
+    else:
+        url, schema = request.getfixturevalue("empty_postgres_db")
+        _skip_if_async_driver_unavailable("postgresql")
+        async_url = _sync_url_to_async_url(url)
+        yield (async_url, schema)

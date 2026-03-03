@@ -20,6 +20,7 @@ CONTAINER_NAME = "dbconform-postgres"
 POSTGRES_PORT = 15432
 POSTGRES_URL = f"postgresql://postgres:postgres@127.0.0.1:{POSTGRES_PORT}/postgres"
 
+
 def _try_connect_postgres(url: str, timeout: float = 5.0) -> tuple[bool, str | None]:
     """
     Try to connect to Postgres at url (postgresql:// or postgresql+psycopg://),
@@ -64,8 +65,7 @@ def _get_container_runtime_path() -> str:
     if path:
         return path
     typer.echo(
-        "Container runtime not found (docker/podman). Set DBCONFORM_CONTAINER_CMD "
-        "or install Docker/Podman.",
+        "Container runtime not found (docker/podman). Set DBCONFORM_CONTAINER_CMD or install Docker/Podman.",
         err=True,
     )
     raise typer.Exit(1)
@@ -166,6 +166,7 @@ def _psycopg_available() -> bool:
     """Return True if psycopg is installed (postgres extra)."""
     try:
         import psycopg  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -265,8 +266,7 @@ def postgres_up() -> None:
             )
         elif "already in use" in err or "Conflict" in err or "exists" in err:
             typer.echo(
-                f"Container {CONTAINER_NAME} already exists. "
-                "Run 'dbconform test postgres down' first.",
+                f"Container {CONTAINER_NAME} already exists. Run 'dbconform test postgres down' first.",
                 err=True,
             )
         else:
@@ -277,8 +277,7 @@ def postgres_up() -> None:
     if err_msg == "psycopg not installed":
         typer.echo(f"Set: DBCONFORM_TEST_POSTGRES_URL={POSTGRES_URL}")
         typer.echo(
-            "Run 'dbconform test run' to run tests. "
-            "(Install [postgres] extra to verify connection at start.)"
+            "Run 'dbconform test run' to run tests. (Install [postgres] extra to verify connection at start.)"
         )
         return
     deadline = time.monotonic() + 30
@@ -339,8 +338,7 @@ def postgres_status() -> None:
     container_cmd = _get_container_runtime_path()
     if not _container_running(container_cmd):
         typer.echo(
-            f"Container {CONTAINER_NAME} is not running. "
-            "Run 'dbconform test postgres up' to start it.",
+            f"Container {CONTAINER_NAME} is not running. Run 'dbconform test postgres up' to start it.",
             err=True,
         )
         raise typer.Exit(1)

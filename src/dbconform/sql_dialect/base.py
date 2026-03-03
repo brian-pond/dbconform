@@ -124,9 +124,7 @@ class Dialect(ABC):
         ref = self.qualified_table(fk.ref_table)
         name_part = f"CONSTRAINT {self._quote(fk.name)} " if fk.name else ""
         tbl = self.qualified_table(table_name)
-        return (
-            f"ALTER TABLE {tbl} ADD {name_part}FOREIGN KEY ({cols}) REFERENCES {ref} ({ref_cols})"
-        )
+        return f"ALTER TABLE {tbl} ADD {name_part}FOREIGN KEY ({cols}) REFERENCES {ref} ({ref_cols})"
 
     def add_check_sql(
         self,

@@ -17,6 +17,7 @@
   - **Pass an existing DB connection** (that they created), or
   - **Pass credentials** so that dbconform creates and uses the connection.
 - When the caller passes **credentials** (not a connection), dbconform **opens** the connection, runs the conform, and **closes** the connection. The caller does not manage connection lifecycle in that case.
+- **Sync and async:** `DbConform` accepts sync `Connection` (or credentials with sync URLs like `sqlite:///`, `postgresql+psycopg://`). `AsyncDbConform` accepts async `AsyncConnection` (or credentials with async URLs like `sqlite+aiosqlite:///`, `postgresql+asyncpg://`). Sync URLs must not be passed to `AsyncDbConform`; async URLs must not be passed to `DbConform`.
 
 ### Target schema
 - For databases that support schemas (e.g. PostgreSQL), the **target schema** must be supplied by the caller and is a **mandatory** argument at dbconform instantiation (or equivalent API entry point). The caller is responsible for specifying which schema to conform. For databases that do not have schemas (e.g. SQLite), the target-schema argument may be omitted or ignored.

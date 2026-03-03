@@ -65,9 +65,7 @@ class PostgreSQLDialect(Dialect):
         pk_inline = (
             table.primary_key
             and len(table.primary_key.column_names) == 1
-            and any(
-                c.autoincrement and c.name in table.primary_key.column_names for c in table.columns
-            )
+            and any(c.autoincrement and c.name in table.primary_key.column_names for c in table.columns)
         )
         for col in table.columns:
             pg_type = self.to_ddl_type(col, pk_autoincrement=bool(pk_inline and table.primary_key))
@@ -141,9 +139,7 @@ class PostgreSQLDialect(Dialect):
             if new_column.default is None:
                 stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} DROP DEFAULT")
             else:
-                stmts.append(
-                    f"ALTER TABLE {tbl} ALTER COLUMN {qcol} SET DEFAULT {new_column.default}"
-                )
+                stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} SET DEFAULT {new_column.default}")
         if not stmts:
             return None
         return "; ".join(stmts)
@@ -163,9 +159,7 @@ class PostgreSQLDialect(Dialect):
         column_name: str,
     ) -> str | None:
         """PostgreSQL supports ALTER TABLE ... DROP COLUMN."""
-        return (
-            f"ALTER TABLE {self.qualified_table(table_name)} DROP COLUMN {self._quote(column_name)}"
-        )
+        return f"ALTER TABLE {self.qualified_table(table_name)} DROP COLUMN {self._quote(column_name)}"
 
     def drop_table_sql(self, table_name: QualifiedName) -> str:
         """Generate DROP TABLE for PostgreSQL."""

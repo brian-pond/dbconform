@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.schema import Table
 
 from dbconform.adapters.model_schema import _extract_table_def
@@ -75,3 +76,22 @@ class DatabaseSchema:
             table_def = _dialect_for_connection(connection).normalize_reflected_table(table_def)
             instance._tables[table_def.name] = table_def
         return instance
+
+    @classmethod
+    async def from_connection_async(
+        cls,
+        connection: AsyncConnection,
+        target_schema: str | None = None,
+    ) -> DatabaseSchema:
+        """
+        Reflect the database and build DatabaseSchema using an async connection.
+
+        Uses run_sync to run the sync reflection logic. For databases without schemas
+        (e.g. SQLite), target_schema is ignored. For PostgreSQL, only tables in
+        target_schema are reflected (target_schema must be provided).
+        """
+
+        def _reflect(sync_conn: Connection) -> DatabaseSchema:
+            return cls.from_connection(sync_conn, target_schema)
+
+        return await connection.run_sync(_reflect)

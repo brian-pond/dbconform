@@ -4,6 +4,9 @@ All notable changes to the requirements docs are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Async support:** `AsyncDbConform` for async database connections. Pass `async_connection` (SQLAlchemy `AsyncConnection`) or `credentials` with async driver URLs (`sqlite+aiosqlite://`, `postgresql+asyncpg://`). Use `await conform.compare()` and `await conform.apply_changes()`. Optional `[async]` extra provides `aiosqlite` and `asyncpg`. See 01-functional (Database connection) and README.
+
 ### Changed
 - **API rename:** `do_conform()` → `apply_changes()`; clearer name for applying schema changes. Docs and tests updated.
 - **Internal naming:** CLI `_run` → `_run_subprocess`; `_get_container_cmd` → `_get_container_runtime_path`; `test_run` → `run_test_suite`; conform `_step_target` → `_step_target_for_error`; compare/diff `_dict_from` → `_build_dict_by_key`, `_fk_key` → `_foreign_key_key`; spelled-out abbrevs in `_build_table_diff`.

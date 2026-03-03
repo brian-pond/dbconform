@@ -25,9 +25,14 @@ Homepage = "https://github.com/brian-pond/dbconform"
 Repository = "https://github.com/brian-pond/dbconform"
 
 [project.optional-dependencies]
+async = [
+    "aiosqlite",
+    "asyncpg",
+]
 dev = [
     "build",
     "pytest",
+    "pytest-asyncio",
     "ruff",
     "sqlmodel",
     "typer>=0.9",
@@ -35,6 +40,9 @@ dev = [
 postgres = [
     "psycopg[binary]>=3",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.ruff]
 target-version = "py311"

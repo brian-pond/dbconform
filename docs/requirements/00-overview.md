@@ -24,7 +24,7 @@ The Python ecosystem lacks a mature, multi-database, production-ready solution f
 
 ## Inspiration
 
-- **pysqlsync** (https://github.com/hunyadi/pysqlsync): Primary reference for model-to-database conformity. We adopted its split of an internal schema from two sides (formation from code, discovery from DB), the Mutator-style diff-to-DDL flow, dialect-specific DDL modules, and options for drops (allow_drop, report extra tables). dbconform uses SQLAlchemy/SQLModel and synchronous execution rather than dataclasses and async.
+- **pysqlsync** (https://github.com/hunyadi/pysqlsync): Primary reference for model-to-database conformity. We adopted its split of an internal schema from two sides (formation from code, discovery from DB), the Mutator-style diff-to-DDL flow, dialect-specific DDL modules, and options for drops (allow_drop, report extra tables). dbconform uses SQLAlchemy/SQLModel and supports both sync (`DbConform`) and async (`AsyncDbConform`) execution.
 - **migra** and **results** (https://github.com/djrobstep/migra, https://github.com/djrobstep/results): DB-to-DB comparison tools. Components that informed dbconform's design (we do not ship or depend on them):
   - **`differences()`** (results/dbdiff/util.py): Compare two keyed structures and return added, removed, modified, and unmodified. We use the same pattern in `schema/diff.py` to compare model-side internal schema vs database-side internal schema.
   - **Dependency-ordered DDL**: Migra's `changes.py` and `statements_from_differences()` apply creations/drops in dependency order (e.g. create tables before FKs). Our `ConformPlanBuilder` and `_topological_table_order()` follow the same idea for table creation.
