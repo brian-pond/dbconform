@@ -5,8 +5,8 @@ Traceability: docs/requirements/01-functional.md (Plan and DDL order);
 docs/technical/02-architecture.md (Core functions: Compare). Scenarios: added, removed, modified tables.
 """
 
-from modelsync.compare import SchemaDiffer, differences
-from modelsync.internal import ColumnDef, QualifiedName, TableDef
+from dbconform.compare import SchemaDiffer, differences
+from dbconform.internal import ColumnDef, QualifiedName, TableDef
 
 
 def test_differences_added_removed_modified() -> None:

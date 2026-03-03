@@ -10,8 +10,8 @@ When adding or changing CLI commands (Typer/Click or similar), **never** let the
 
 ## Default behavior
 
-- **Root** (e.g. `modelsync`): show main help (commands, options, args).
-- **Any command group** (e.g. `modelsync db`): show that group's help (subcommands, options, args).
+- **Root** (e.g. `dbconform`): show main help (commands, options, args).
+- **Any command group** (e.g. `dbconform db`): show that group's help (subcommands, options, args).
 
 Do not require the user to pass `--help` to get this; treat "no subcommand" as "show what's available."
 

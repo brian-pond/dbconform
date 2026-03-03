@@ -1,6 +1,6 @@
-# modelsync
+# dbconform
 
-A Python library for schema and model synchronization: keep your database schema in sync with your SQLAlchemy or SQLModel definitions.
+A Python library to conform database schema to models: keep your database schema in line with your SQLAlchemy or SQLModel definitions.
 
 ## Prerequisites
 
@@ -19,11 +19,11 @@ pip install -e ".[dev]"
 
 ## Installing in other projects
 
-To use modelsync in another Python application:
+To use dbconform in another Python application:
 
-- **Development (same machine):** From your other project, run `pip install -e /path/to/modelsync` or `uv pip install -e /path/to/modelsync`. Changes in the modelsync repo are reflected immediately.
-- **Built wheel:** From the modelsync repo run `uv build` (requires `uv` and dev deps: `pip install -e ".[dev]"`). This produces a wheel in `dist/` (e.g. `dist/modelsync-0.1.0-py3-none-any.whl`). In your other project: `pip install /path/to/modelsync/dist/modelsync-0.1.0-py3-none-any.whl`.
-- **Private index:** Upload the contents of `dist/` to your index; then `pip install modelsync --index-url https://your-index/simple/`.
+- **Development (same machine):** From your other project, run `pip install -e /path/to/dbconform` or `uv pip install -e /path/to/dbconform`. Changes in the dbconform repo are reflected immediately.
+- **Built wheel:** From the dbconform repo run `uv build` (requires `uv` and dev deps: `pip install -e ".[dev]"`). This produces a wheel in `dist/` (e.g. `dist/dbconform-0.1.0-py3-none-any.whl`). In your other project: `pip install /path/to/dbconform/dist/dbconform-0.1.0-py3-none-any.whl`.
+- **Private index:** Upload the contents of `dist/` to your index; then `pip install dbconform --index-url https://your-index/simple/`.
 
 ## Running tests
 
@@ -44,36 +44,36 @@ See `tests/TESTS_README.md` for how tests are organized.
 
 ## Usage
 
-Use modelsync as a library: define your models (e.g. SQLAlchemy or SQLModel), then compare them to the database. By default, only a plan is produced; apply only when you explicitly opt in.
+Use dbconform as a library: define your models (e.g. SQLAlchemy or SQLModel), then compare them to the database. By default, only a plan is produced; apply only when you explicitly opt in.
 
-### ModelSync: the three main entry points
+### DbConform: the three main entry points
 
-**1. `ModelSync(...)` — set up the connection**
+**1. `DbConform(...)` — set up the connection**
 
-Create a `ModelSync` instance by passing either:
+Create a `DbConform` instance by passing either:
 
-- **`credentials={"url": "sqlite:///./mydb.sqlite"}`** — modelsync will open the database, run your call, then close it. No need to manage the connection yourself.
+- **`credentials={"url": "sqlite:///./mydb.sqlite"}`** — dbconform will open the database, run your call, then close it. No need to manage the connection yourself.
 - **`connection=engine.connect()`** — you provide an open connection; you are responsible for closing it when done.
 
 For databases that use schemas (e.g. PostgreSQL), also pass **`target_schema="public"`** (or your schema name). For SQLite you can omit it.
 
 **2. `compare(models)` — see what would change (dry run)**
 
-Pass one model class or a list of model classes. modelsync compares their combined schema to the live database and returns a **plan** of steps (create table, add column, add constraint, etc.) without executing anything. Use this to inspect changes, log them, or generate a DDL script with `plan.sql()`. Returns a `SyncPlan` or a `SyncError` if something went wrong.
+Pass one model class or a list of model classes. dbconform compares their combined schema to the live database and returns a **plan** of steps (create table, add column, add constraint, etc.) without executing anything. Use this to inspect changes, log them, or generate a DDL script with `plan.sql()`. Returns a `ConformPlan` or a `ConformError` if something went wrong.
 
-**3. `do_sync(models)` — apply the changes**
+**3. `apply_changes(models)` — apply the changes**
 
-Same comparison as `compare()`, but **runs** the plan against the database. By default all steps run in one transaction: if any step fails, everything is rolled back. Returns the applied `SyncPlan` on success or a `SyncError` on failure. Optional: `commit_per_step=True` to commit after each step (partial progress on failure), or `log_file="path"` to append applied steps to a file.
+Same comparison as `compare()`, but **runs** the plan against the database. By default all steps run in one transaction: if any step fails, everything is rolled back. Returns the applied `ConformPlan` on success or a `ConformError` on failure. Optional: `commit_per_step=True` to commit after each step (partial progress on failure), or `log_file="path"` to append applied steps to a file.
 
 ---
 
-Define one or more models and pass them (single class or a list) to `compare()` or `do_sync()`. The example below uses `compare()` to get a plan.
+Define one or more models and pass them (single class or a list) to `compare()` or `apply_changes()`. The example below uses `compare()` to get a plan.
 
 ```python
 from sqlalchemy import Column, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import DeclarativeBase
 
-from modelsync import ModelSync, SyncError
+from dbconform import DbConform, ConformError
 
 class Product(DeclarativeBase):
     __tablename__ = "product"
@@ -87,10 +87,10 @@ class Cart(DeclarativeBase):
     product_id = Column(Integer, ForeignKey("product.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
 
-sync = ModelSync(credentials={"url": "sqlite:///./mydb.sqlite"})
-result_plan = sync.compare([Product, Cart])
+conform = DbConform(credentials={"url": "sqlite:///./mydb.sqlite"})
+result_plan = conform.compare([Product, Cart])
 
-if isinstance(result_plan, SyncError):
+if isinstance(result_plan, ConformError):
     print("Compare failed:", result_plan.messages)
 else:
     if not result_plan.steps:
@@ -108,8 +108,8 @@ from sqlalchemy import create_engine
 
 engine = create_engine("sqlite:///./mydb.sqlite")
 with engine.connect() as conn:
-    sync = ModelSync(connection=conn)
-    result_plan = sync.compare([Product, Cart])
+    conform = DbConform(connection=conn)
+    result_plan = conform.compare([Product, Cart])
 engine.dispose()
 ```
 
@@ -135,18 +135,18 @@ Add column quantity to cart
 
 To get the full DDL script as a single string, use `result_plan.sql()`.
 
-### Applying the plan with do_sync()
+### Applying the plan with apply_changes()
 
-To compare and apply the plan in one go (run the DDL against the database), use `do_sync()`. It uses the same comparison as `compare()` but executes the steps in a single transaction (all-or-nothing; rollback on failure). Returns the applied `SyncPlan` on success or `SyncError` on failure.
+To compare and apply the plan in one go (run the DDL against the database), use `apply_changes()`. It uses the same comparison as `compare()` but executes the steps in a single transaction (all-or-nothing; rollback on failure). Returns the applied `ConformPlan` on success or `ConformError` on failure.
 
 ```python
-result_plan = sync.do_sync([Product, Cart])
+result_plan = conform.apply_changes([Product, Cart])
 
-if isinstance(result_plan, SyncError):
-    print("Sync failed:", result_plan.messages)
+if isinstance(result_plan, ConformError):
+    print("Conform failed:", result_plan.messages)
 else:
-    print(f"Applied {len(result_plan.steps)} step(s). Schema is now in sync.")
+    print(f"Applied {len(result_plan.steps)} step(s). Schema is now conformant.")
 ```
 
-Optional: `do_sync(..., commit_per_step=True)` commits after each step so partial progress is kept if a later step fails. `do_sync(..., log_file="/path/to/sync.log")` appends applied steps as JSON lines to a file.
+Optional: `apply_changes(..., commit_per_step=True)` commits after each step so partial progress is kept if a later step fails. `apply_changes(..., log_file="/path/to/conform.log")` appends applied steps as JSON lines to a file.
 

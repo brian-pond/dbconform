@@ -1,9 +1,9 @@
 """
-ModelSync facade: compare code models to a live database and produce or apply a sync plan.
+DbConform facade: compare code models to a live database and produce or apply a conform plan.
 
-Accepts connection or credentials and target_schema; exposes compare(models) and do_sync(models).
+Accepts connection or credentials and target_schema; exposes compare(models) and apply_changes(models).
 See docs/requirements/01-functional.md (Model discovery, Database connection,
-Target schema, Sync flow) and docs/technical/02-architecture.md.
+Target schema, Conform flow) and docs/technical/02-architecture.md.
 """
 
 from __future__ import annotations
@@ -16,18 +16,18 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
-from modelsync.sql_dialect import Dialect, PostgreSQLDialect, SQLiteDialect
-from modelsync.errors import SyncError
-from modelsync.plan import SyncPlan, SyncPlanBuilder
-from modelsync.plan.steps import (
+from dbconform.adapters import ModelSchema
+from dbconform.compare import DatabaseSchema, SchemaDiffer
+from dbconform.errors import ConformError
+from dbconform.plan import ConformPlan, ConformPlanBuilder
+from dbconform.plan.steps import (
     AlterTableStep,
+    ConformStep,
     CreateIndexStep,
     CreateTableStep,
     DropTableStep,
-    SyncStep,
 )
-from modelsync.adapters import ModelSchema
-from modelsync.compare import DatabaseSchema, SchemaDiffer
+from dbconform.sql_dialect import Dialect, PostgreSQLDialect, SQLiteDialect
 
 
 def _emit_apply_log(
@@ -50,7 +50,7 @@ def _emit_apply_log(
             f.write(line)
 
 
-def _step_target(step: SyncStep, index: int) -> tuple[str, str]:
+def _step_target_for_error(step: ConformStep, index: int) -> tuple[str, str]:
     """Return (object_type, identifier) for a step (01-functional: Error handling)."""
     match step:
         case DropTableStep():
@@ -77,25 +77,25 @@ def _dialect_for_engine(engine: Engine) -> Dialect:
 
 def _apply_plan(
     connection: Connection,
-    plan: SyncPlan,
+    plan: ConformPlan,
     *,
     commit_per_step: bool = False,
     log_file: str | None = None,
-) -> SyncError | None:
+) -> ConformError | None:
     """
     Execute all DDL and data-operation statements in the plan.
 
     When commit_per_step is False (default), runs in one transaction; on failure
     the transaction is rolled back (01-functional: Transaction behavior).
     When commit_per_step is True, commits after each step.
-    On any failure returns SyncError with target_objects set to the step that failed.
+    On any failure returns ConformError with target_objects set to the step that failed.
     """
     statements = plan.statements()
     if not statements:
         return None
     steps_with_sql = [s for s in plan.steps if s.sql and s.sql.strip()]
 
-    def run_step(i: int, sql: str) -> SyncError | None:
+    def run_step(i: int, sql: str) -> ConformError | None:
         try:
             for part in (p.strip() for p in sql.split(";") if p.strip()):
                 connection.execute(text(part))
@@ -109,8 +109,8 @@ def _apply_plan(
             step = steps_with_sql[i] if i < len(steps_with_sql) else None
             desc = step.description if step else f"step_{i}"
             e.add_note(f"Step {i}: {desc}")
-            target = _step_target(step, i) if step else ("step", f"step_{i}")
-            return SyncError(target_objects=[target], messages=[str(e)])
+            target = _step_target_for_error(step, i) if step else ("step", f"step_{i}")
+            return ConformError(target_objects=[target], messages=[str(e)])
 
     if commit_per_step:
         for i, sql in enumerate(statements):
@@ -126,12 +126,12 @@ def _apply_plan(
     return None
 
 
-class ModelSync:
+class DbConform:
     """
-    Entry point for comparing code models to a database and building or applying a sync plan.
+    Entry point for comparing code models to a database and building or applying a conform plan.
 
     Pass either an existing connection (caller manages lifecycle) or
-    credentials (modelsync opens, runs, closes). target_schema is required
+    credentials (dbconform opens, runs, closes). target_schema is required
     for PostgreSQL; omit or None for SQLite.
     """
 
@@ -174,11 +174,11 @@ class ModelSync:
         allow_drop_constraint: bool = True,
         allow_shrink_column: bool = False,
         report_extra_tables: bool = True,
-    ) -> SyncPlan | SyncError:
+    ) -> ConformPlan | ConformError:
         """
         Compare models to the database using an open connection; does not close it.
 
-        Returns SyncPlan or SyncError. Used by compare() and do_sync().
+        Returns ConformPlan or ConformError. Used by compare() and apply_changes().
         """
         try:
             dialect = self._get_dialect(connection)
@@ -189,7 +189,7 @@ class ModelSync:
             db_schema = DatabaseSchema.from_connection(connection, self._target_schema)
             differ = SchemaDiffer()
             diff = differ.diff(model_schema, db_schema)
-            builder = SyncPlanBuilder(
+            builder = ConformPlanBuilder(
                 dialect,
                 allow_drop_table=allow_drop_table,
                 allow_drop_column=allow_drop_column,
@@ -200,7 +200,7 @@ class ModelSync:
             return builder.build(diff)
         except Exception as e:
             e.add_note("During compare (model-side internal schema vs database-side internal schema).")
-            return SyncError(
+            return ConformError(
                 target_objects=[("compare", "schema")],
                 messages=[str(e)],
             )
@@ -214,12 +214,12 @@ class ModelSync:
         allow_drop_constraint: bool = True,
         allow_shrink_column: bool = False,
         report_extra_tables: bool = True,
-    ) -> SyncPlan | SyncError:
+    ) -> ConformPlan | ConformError:
         """
-        Compare models to the database and return a sync plan (no apply).
+        Compare models to the database and return a conform plan (no apply).
 
         models: single model class or sequence of model classes (SQLAlchemy/SQLModel).
-        Returns SyncPlan with ordered steps and optional extra_tables; or SyncError on failure.
+        Returns ConformPlan with ordered steps and optional extra_tables; or ConformError on failure.
         """
         conn = None
         try:
@@ -239,7 +239,7 @@ class ModelSync:
                 if self._engine is not None:
                     self._engine.dispose()
 
-    def do_sync(
+    def apply_changes(
         self,
         models: type | Sequence[type],
         *,
@@ -250,12 +250,12 @@ class ModelSync:
         report_extra_tables: bool = True,
         commit_per_step: bool = False,
         log_file: str | None = None,
-    ) -> SyncPlan | SyncError:
+    ) -> ConformPlan | ConformError:
         """
         Compare models to the database and apply the resulting plan (run DDL and data ops).
 
-        Same comparison options as compare(). On success, returns the SyncPlan that was
-        applied. On comparison or apply failure, returns SyncError. By default apply uses
+        Same comparison options as compare(). On success, returns the ConformPlan that was
+        applied. On comparison or apply failure, returns ConformError. By default apply uses
         a single transaction (all-or-nothing rollback on failure); set commit_per_step=True
         to commit after each step (01-functional: Transaction behavior).
         Applied steps are logged as JSON lines to stdout (02-non-functional: Observability);
@@ -273,7 +273,7 @@ class ModelSync:
                 allow_shrink_column=allow_shrink_column,
                 report_extra_tables=report_extra_tables,
             )
-            if isinstance(plan_or_error, SyncError):
+            if isinstance(plan_or_error, ConformError):
                 return plan_or_error
             plan = plan_or_error
             if not commit_per_step:
@@ -290,9 +290,9 @@ class ModelSync:
                 conn.commit()
             return plan
         except Exception as e:
-            e.add_note("During connection or apply/sync.")
-            return SyncError(
-                target_objects=[("connection", "sync")],
+            e.add_note("During connection or apply/conform.")
+            return ConformError(
+                target_objects=[("connection", "conform")],
                 messages=[str(e)],
             )
         finally:

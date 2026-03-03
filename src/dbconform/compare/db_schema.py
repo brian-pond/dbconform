@@ -12,13 +12,13 @@ from sqlalchemy import MetaData
 from sqlalchemy.engine import Connection
 from sqlalchemy.schema import Table
 
-from modelsync.adapters.model_schema import _extract_table_def
-from modelsync.internal.objects import QualifiedName, TableDef
+from dbconform.adapters.model_schema import _extract_table_def
+from dbconform.internal.objects import QualifiedName, TableDef
 
 
 def _dialect_for_connection(connection: Connection):
     """Return our Dialect for the connection's engine (for normalize_reflected_table)."""
-    from modelsync.sql_dialect import PostgreSQLDialect, SQLiteDialect
+    from dbconform.sql_dialect import PostgreSQLDialect, SQLiteDialect
 
     name = connection.dialect.name
     match name:

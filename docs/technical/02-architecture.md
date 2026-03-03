@@ -1,23 +1,23 @@
 # Architecture (high level)
 
-High-level data flow for comparing code models to a live database and producing a sync plan. See [docs/requirements/01-functional.md](../requirements/01-functional.md) for required behavior.
+High-level data flow for comparing code models to a live database and producing a conform plan. See [docs/requirements/01-functional.md](../requirements/01-functional.md) for required behavior.
 
 ## Core functions
 
-modelsync is organized around four distinct functions:
+dbconform is organized around four distinct functions:
 
 1. **Internal schema** — Defines a neutral, library-agnostic representation of a SQL table's schema (tables, columns, constraints, indexes). No dependency on SQLAlchemy, Django, or other ORMs.
-2. **Adapters (ingest)** — Take well-known third-party models (SQLAlchemy, SQLModel; later Django, Tortoise, Piccolo) and produce the modelsync internal schema. Ingestion is **read-only**: we do not modify the caller's model classes or their `__table__` / columns.
+2. **Adapters (ingest)** — Take well-known third-party models (SQLAlchemy, SQLModel; later Django, Tortoise, Piccolo) and produce the dbconform internal schema. Ingestion is **read-only**: we do not modify the caller's model classes or their `__table__` / columns.
 3. **Compare** — Reflect a live database into the database-side internal schema and compare it to the model-side internal schema; produce a structured diff (added, removed, modified).
 4. **DDL generation** — From the comparison result, build an ordered plan and generate dialect-specific DDL to bring the target database into parity with the model.
 
 The following diagram and sections describe how these functions are wired together.
 
-**Package layout:** The codebase is organized as subpackages under `modelsync`: `internal` (neutral schema types and type names), `adapters` (third-party model → internal), `compare` (DB reflection and diff), `plan` (diff → ordered steps), and `sql_dialect` (steps → DDL). The `schema` package is retained as a backward-compatibility re-export of the public API from internal, adapters, and compare.
+**Package layout:** The codebase is organized as subpackages under `dbconform`: `internal` (neutral schema types and type names), `adapters` (third-party model → internal), `compare` (DB reflection and diff), `plan` (diff → ordered steps), and `sql_dialect` (steps → DDL). The `schema` package is retained as a backward-compatibility re-export of the public API from internal, adapters, and compare.
 
 ## Internal schema: design goals
 
-The **internal schema** is modelsync’s intermediate representation of SQL schema. Its overarching goal:
+The **internal schema** is dbconform’s intermediate representation of SQL schema. Its overarching goal:
 
 - **Lightweight, frozen/immutable** — Table, Column, Index, Constraint (and related types) are minimal, immutable structures, so they are easy to compare, hash, and pass around without side effects. The current implementation uses frozen dataclasses (e.g. `@dataclass(frozen=True)`); the design requirement is immutability and minimal surface, not a specific Python mechanism.
 - **Lingua franca** — A single representation that sits between **ORMs** (SQLAlchemy, SQLModel, Django, Tortoise, Piccolo) and **databases** (SQLite, PostgreSQL, MariaDB). Each side adapts to or from this representation; the core compare/diff and migration-generation logic speaks only the internal schema.
@@ -41,10 +41,10 @@ flowchart LR
   end
   subgraph core [Core]
     Diff[SchemaDiffer]
-    Plan[SyncPlanBuilder]
+    Plan[ConformPlanBuilder]
   end
   subgraph output [Output]
-    PlanOut[SyncPlan]
+    PlanOut[ConformPlan]
   end
   Models --> MS
   DB --> DS
@@ -58,14 +58,14 @@ flowchart LR
 
 - **ModelSchema** / **DatabaseSchema**: Internal schema (lightweight, frozen/immutable) representation of tables, columns, constraints, and indexes so the two sides can be compared by name/identity. See "Internal schema: design goals" above.
 - **SchemaDiffer**: Compares model-side internal schema to database-side internal schema; produces added, removed, modified, and extra (unmanaged) tables.
-- **SyncPlanBuilder**: Builds an ordered list of DDL and data-operation steps from the diff, with dependency-safe ordering and configurable drop behavior.
-- **ModelSync** (facade): Library entry point; accepts connection or credentials and target schema, exposes `compare()` returning a **SyncPlan**.
+- **ConformPlanBuilder**: Builds an ordered list of DDL and data-operation steps from the diff, with dependency-safe ordering and configurable drop behavior.
+- **DbConform** (facade): Library entry point; accepts connection or credentials and target schema, exposes `compare()` returning a **ConformPlan**.
 
 ## Types
 
 Column types are represented in the internal schema as **data_type_name** (a string on `ColumnDef`). The flow is:
 
-1. **Model → internal**: SQLAlchemy column types are compiled with the connection dialect (`column.type.compile(dialect)`), producing a type string. Optionally, a schema normalizer (modelsync Dialect) rewrites the table so type strings match a neutral form (e.g. PostgreSQL: `CHARACTER VARYING(255)` → `VARCHAR(255)`, `DOUBLE PRECISION` → `FLOAT`).
+1. **Model → internal**: SQLAlchemy column types are compiled with the connection dialect (`column.type.compile(dialect)`), producing a type string. Optionally, a schema normalizer (dbconform Dialect) rewrites the table so type strings match a neutral form (e.g. PostgreSQL: `CHARACTER VARYING(255)` → `VARCHAR(255)`, `DOUBLE PRECISION` → `FLOAT`).
 2. **Reflection → internal**: Reflected tables are built from DB metadata (same compile); then the backend’s Dialect **normalize_reflected_table** and **to_neutral_type** rewrite columns so they use the same neutral type strings (e.g. SERIAL/nextval → `default=None`, `autoincrement=True`, neutral type string).
 3. **Neutral → DDL**: When generating SQL, each Dialect maps **data_type_name** to platform-specific DDL (e.g. SQLite uses data_type_name as-is; PostgreSQL maps INTEGER + autoincrement PK → SERIAL). Shared parsing (e.g. VARCHAR length) lives on the base Dialect (`_parse_varchar_length`).
 

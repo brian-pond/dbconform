@@ -7,7 +7,7 @@ Traceability: docs/technical/02-architecture.md (Core functions: Adapters ingest
 from sqlalchemy import Column
 from sqlalchemy import types as sa_types
 
-from modelsync.adapters import sa_column_to_neutral_type
+from dbconform.adapters import sa_column_to_neutral_type
 
 
 def test_sa_column_integer() -> None:

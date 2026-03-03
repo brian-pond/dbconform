@@ -4,7 +4,7 @@ Unit tests for neutral type constants and helpers.
 Traceability: docs/technical/02-architecture.md (Core functions: Internal schema; Types).
 """
 
-from modelsync.internal import (
+from dbconform.internal import (
     CanonicalType,
     canonical_char,
     canonical_numeric,

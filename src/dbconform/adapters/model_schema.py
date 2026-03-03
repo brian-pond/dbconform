@@ -20,8 +20,8 @@ from sqlalchemy import Table
 from sqlalchemy.engine import Dialect
 from sqlalchemy.schema import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
 
-from modelsync.adapters.sa_to_neutral import sa_column_to_neutral_type
-from modelsync.internal.objects import (
+from dbconform.adapters.sa_to_neutral import sa_column_to_neutral_type
+from dbconform.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -201,8 +201,9 @@ class ModelSchema:
         Each model must have __table__ (SQLAlchemy Table). Column types are
         mapped to neutral type names (no target database). target_schema is
         used when table.schema is None (e.g. PostgreSQL default schema).
-        If schema_normalizer is provided (e.g. modelsync Dialect), its
-        normalize_reflected_table is applied so model-side internal schema compares equal to database-side internal schema.
+        If schema_normalizer is provided (e.g. dbconform Dialect), its
+        normalize_reflected_table is applied so model-side internal schema
+        compares equal to database-side internal schema.
         """
         if isinstance(models, type):
             model_seq: Sequence[type] = (models,)

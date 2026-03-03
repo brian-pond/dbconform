@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 
-from modelsync.internal.objects import (
+from dbconform.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,

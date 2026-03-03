@@ -5,7 +5,7 @@ SQLite does not support ALTER COLUMN; we assert diff/plan behavior and that reco
 shows difference where no DDL is emitted. Traceability: docs/requirements/01-functional.md.
 
 PostgreSQL supports ALTER COLUMN; separate tests below assert plan has ALTER step(s) and
-do_sync achieves parity (recompare 0 steps).
+apply_changes achieves parity (recompare 0 steps).
 """
 
 from pathlib import Path
@@ -13,8 +13,8 @@ from typing import Any, TypeVar
 
 from sqlalchemy import create_engine, text
 
-import modelsync
-from modelsync.plan import SyncPlan
+import dbconform
+from dbconform.plan import ConformPlan
 from tests.shared_models import SimpleTable, SimpleTableWideName
 
 _ModelT = TypeVar("_ModelT")
@@ -26,9 +26,9 @@ def _postgres_alter_then_parity(
     create_sql: str,
     model_class: type[_ModelT],
     **compare_kw: Any,
-) -> SyncPlan:
+) -> ConformPlan:
     """
-    Create table from create_sql, compare to model, assert plan has steps, do_sync, recompare 0.
+    Create table from create_sql, compare to model, assert plan has steps, apply_changes, recompare 0.
 
     Returns the first plan so callers can assert on plan.sql() (e.g. ALTER, NOT NULL).
     """
@@ -37,13 +37,13 @@ def _postgres_alter_then_parity(
         conn.execute(text(create_sql))
         conn.commit()
     engine.dispose()
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=schema)
-    plan_or_err = sync.compare(model_class, **compare_kw)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=schema)
+    plan_or_err = conform.compare(model_class, **compare_kw)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) >= 1
-    result = sync.do_sync(model_class, **compare_kw)
-    assert not isinstance(result, modelsync.SyncError)
-    recompare = sync.compare(model_class)
+    result = conform.apply_changes(model_class, **compare_kw)
+    assert not isinstance(result, dbconform.ConformError)
+    recompare = conform.compare(model_class)
     assert len(recompare.steps) == 0
     return plan_or_err
 
@@ -65,13 +65,13 @@ def test_data_type_mismatch_no_alter_step_sqlite_recompare_still_different(
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    plan_or_err = sync.compare(SimpleTable)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    plan_or_err = conform.compare(SimpleTable)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
 
-    sync.do_sync(SimpleTable)
-    recompare = sync.compare(SimpleTable)
+    conform.apply_changes(SimpleTable)
+    recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
     with create_engine(url).connect() as conn:
         r = conn.execute(text("PRAGMA table_info(simple_table)"))
@@ -98,13 +98,13 @@ def test_length_shorter_in_db_no_alter_sqlite_recompare_still_different(
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    plan_or_err = sync.compare(SimpleTable)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    plan_or_err = conform.compare(SimpleTable)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
 
-    sync.do_sync(SimpleTable)
-    recompare = sync.compare(SimpleTable)
+    conform.apply_changes(SimpleTable)
+    recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
 
 
@@ -125,13 +125,13 @@ def test_length_longer_in_db_model_shorter_no_alter_sqlite(
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    plan_or_err = sync.compare(SimpleTable)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    plan_or_err = conform.compare(SimpleTable)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
 
-    sync.do_sync(SimpleTable)
-    recompare = sync.compare(SimpleTable)
+    conform.apply_changes(SimpleTable)
+    recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
 
 
@@ -152,12 +152,12 @@ def test_length_shrink_no_step_without_allow_shrink_column(
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    plan_or_err = sync.compare(SimpleTable, allow_shrink_column=False)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    plan_or_err = conform.compare(SimpleTable, allow_shrink_column=False)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
-    plan_allow = sync.compare(SimpleTable, allow_shrink_column=True)
-    assert not isinstance(plan_allow, modelsync.SyncError)
+    plan_allow = conform.compare(SimpleTable, allow_shrink_column=True)
+    assert not isinstance(plan_allow, dbconform.ConformError)
     assert len(plan_allow.steps) == 0
 
 
@@ -176,13 +176,13 @@ def test_model_wider_length_db_narrower_no_alter_sqlite(empty_sqlite_db: tuple[P
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    plan_or_err = sync.compare(SimpleTableWideName)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    plan_or_err = conform.compare(SimpleTableWideName)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
 
-    sync.do_sync(SimpleTableWideName)
-    recompare = sync.compare(SimpleTableWideName)
+    conform.apply_changes(SimpleTableWideName)
+    recompare = conform.compare(SimpleTableWideName)
     assert len(recompare.steps) == 0
 
 
@@ -201,13 +201,13 @@ def test_nullability_differs_no_alter_sqlite(empty_sqlite_db: tuple[Path, str]) 
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    plan_or_err = sync.compare(SimpleTable)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    plan_or_err = conform.compare(SimpleTable)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
 
-    sync.do_sync(SimpleTable)
-    recompare = sync.compare(SimpleTable)
+    conform.apply_changes(SimpleTable)
+    recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
 
 
@@ -226,23 +226,23 @@ def test_default_differs_no_alter_sqlite(empty_sqlite_db: tuple[Path, str]) -> N
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    plan_or_err = sync.compare(SimpleTable)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    plan_or_err = conform.compare(SimpleTable)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
 
-    sync.do_sync(SimpleTable)
-    recompare = sync.compare(SimpleTable)
+    conform.apply_changes(SimpleTable)
+    recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
 
 
-# --- PostgreSQL: ALTER COLUMN emitted; do_sync achieves parity (01-functional: Schema parity). ---
+# --- PostgreSQL: ALTER COLUMN emitted; apply_changes achieves parity (01-functional: Schema parity). ---
 
 
 def test_data_type_mismatch_postgres_alter_then_parity(
     empty_postgres_db: tuple[str, str],
 ) -> None:
-    """DB INTEGER for value, model FLOAT. PostgreSQL emits ALTER COLUMN; do_sync then parity."""
+    """DB INTEGER for value, model FLOAT. PostgreSQL emits ALTER COLUMN; apply_changes then parity."""
     url, schema = empty_postgres_db
     plan = _postgres_alter_then_parity(
         url,
@@ -258,7 +258,7 @@ def test_data_type_mismatch_postgres_alter_then_parity(
 def test_length_shorter_in_db_postgres_alter_then_parity(
     empty_postgres_db: tuple[str, str],
 ) -> None:
-    """DB VARCHAR(100), model VARCHAR(255). PostgreSQL emits ALTER; do_sync then parity."""
+    """DB VARCHAR(100), model VARCHAR(255). PostgreSQL emits ALTER; apply_changes then parity."""
     url, schema = empty_postgres_db
     _postgres_alter_then_parity(
         url,
@@ -304,7 +304,7 @@ def test_model_wider_length_db_narrower_postgres_alter_then_parity(
 def test_nullability_differs_postgres_alter_then_parity(
     empty_postgres_db: tuple[str, str],
 ) -> None:
-    """DB name nullable, model NOT NULL. PostgreSQL SET NOT NULL; do_sync then parity."""
+    """DB name nullable, model NOT NULL. PostgreSQL SET NOT NULL; apply_changes then parity."""
     url, schema = empty_postgres_db
     plan = _postgres_alter_then_parity(
         url,
@@ -320,7 +320,7 @@ def test_nullability_differs_postgres_alter_then_parity(
 def test_default_differs_postgres_alter_then_parity(
     empty_postgres_db: tuple[str, str],
 ) -> None:
-    """DB has DEFAULT 0 on count, model has no default. PostgreSQL DROP DEFAULT; do_sync then parity."""
+    """DB has DEFAULT 0 on count, model has no default. PostgreSQL DROP DEFAULT; apply_changes then parity."""
     url, schema = empty_postgres_db
     _postgres_alter_then_parity(
         url,

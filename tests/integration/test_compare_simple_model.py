@@ -1,9 +1,9 @@
 """
-Integration tests: ModelSync.compare() and do_sync() against a real database
+Integration tests: DbConform.compare() and apply_changes() against a real database
 (SQLite and PostgreSQL via empty_db).
 
 Traceability: docs/requirements/01-functional.md — Model discovery and API,
-Database connection, compare() / do_sync(). Acceptance: schema (create tables, columns).
+Database connection, compare() / apply_changes(). Acceptance: schema (create tables, columns).
 """
 
 import json
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 
-import modelsync
+import dbconform
 from tests.shared_models import SimpleTable, SimpleTableWithIndex, SimpleTableWithUnique
 
 
@@ -35,7 +35,7 @@ def test_empty_sqlite_db_fixture(empty_sqlite_db: tuple[Path, str]) -> None:
 
 def test_empty_postgres_db_fixture(empty_postgres_db: tuple[str, str]) -> None:
     """Use empty_postgres_db fixture: DB exists, is writable, and can have tables created.
-    Skips when MODELSYNC_TEST_POSTGRES_URL is not set (01-functional: database connection)."""
+    Skips when DBCONFORM_TEST_POSTGRES_URL is not set (01-functional: database connection)."""
     url, schema = empty_postgres_db
     assert schema == "public"
     engine = create_engine(url)
@@ -59,9 +59,9 @@ def test_empty_postgres_db_fixture(empty_postgres_db: tuple[str, str]) -> None:
 def test_compare_empty_db_returns_create_step(empty_db: tuple[str, str | None]) -> None:
     """Scenario 1: model has table, DB does not — plan contains CREATE TABLE (01-functional)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    result = sync.compare(SimpleTable)
-    assert not isinstance(result, modelsync.SyncError), str(result)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    result = conform.compare(SimpleTable)
+    assert not isinstance(result, dbconform.ConformError), str(result)
     plan = result
     assert len(plan.steps) == 1
     assert "simple_table" in plan.sql()
@@ -73,40 +73,40 @@ def test_compare_with_connection(empty_db: tuple[str, str | None]) -> None:
     url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
-        sync = modelsync.ModelSync(connection=conn, target_schema=target_schema)
-        result = sync.compare(SimpleTable)
+        conform = dbconform.DbConform(connection=conn, target_schema=target_schema)
+        result = conform.compare(SimpleTable)
     engine.dispose()
-    assert not isinstance(result, modelsync.SyncError)
+    assert not isinstance(result, dbconform.ConformError)
     assert len(result.steps) == 1
 
 
-def test_do_sync_with_connection_caller_closes(empty_db: tuple[str, str | None]) -> None:
-    """Caller passes connection; do_sync applies plan; caller closes connection (01-functional)."""
+def test_apply_changes_with_connection_caller_closes(empty_db: tuple[str, str | None]) -> None:
+    """Caller passes connection; apply_changes applies plan; caller closes connection (01-functional)."""
     url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
-        sync = modelsync.ModelSync(connection=conn, target_schema=target_schema)
-        result = sync.do_sync(SimpleTable)
+        conform = dbconform.DbConform(connection=conn, target_schema=target_schema)
+        result = conform.apply_changes(SimpleTable)
     engine.dispose()
-    assert not isinstance(result, modelsync.SyncError), str(result)
+    assert not isinstance(result, dbconform.ConformError), str(result)
     assert len(result.steps) == 1
     # Reopen and recompare to confirm schema parity
     engine2 = create_engine(url)
     with engine2.connect() as conn2:
-        sync2 = modelsync.ModelSync(connection=conn2, target_schema=target_schema)
-        recompare = sync2.compare(SimpleTable)
+        conform2 = dbconform.DbConform(connection=conn2, target_schema=target_schema)
+        recompare = conform2.compare(SimpleTable)
     engine2.dispose()
-    assert not isinstance(recompare, modelsync.SyncError)
+    assert not isinstance(recompare, dbconform.ConformError)
     assert len(recompare.steps) == 0
 
 
 def test_compare_after_create_same_schema_no_steps(empty_db: tuple[str, str | None]) -> None:
     """Scenario 3: table exists in DB and matches model — no steps (schema parity)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    sync.do_sync(SimpleTable)
-    result = sync.compare(SimpleTable)
-    assert not isinstance(result, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    conform.apply_changes(SimpleTable)
+    result = conform.compare(SimpleTable)
+    assert not isinstance(result, dbconform.ConformError)
     assert len(result.steps) == 0
 
 
@@ -118,50 +118,50 @@ def test_compare_extra_table_in_db_reported_not_dropped(empty_db: tuple[str, str
         conn.execute(text("CREATE TABLE other_table (id INTEGER PRIMARY KEY)"))
         conn.commit()
     with engine.connect() as conn:
-        sync = modelsync.ModelSync(connection=conn, target_schema=target_schema)
-        result = sync.compare(SimpleTable)
+        conform = dbconform.DbConform(connection=conn, target_schema=target_schema)
+        result = conform.compare(SimpleTable)
     engine.dispose()
-    assert not isinstance(result, modelsync.SyncError)
+    assert not isinstance(result, dbconform.ConformError)
     assert len(result.extra_tables) == 1
     assert result.extra_tables[0].name == "other_table"
     assert not any("DROP" in (s.sql or "") for s in result.steps)
 
 
-def test_do_sync_applies_plan_then_recompare_parity(empty_db: tuple[str, str | None]) -> None:
-    """Table missing; do_sync applies CREATE; recompare yields 0 steps (01-functional)."""
+def test_apply_changes_applies_plan_then_recompare_parity(empty_db: tuple[str, str | None]) -> None:
+    """Table missing; apply_changes applies CREATE; recompare yields 0 steps (01-functional)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    result = sync.do_sync(SimpleTable)
-    assert not isinstance(result, modelsync.SyncError), str(result)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    result = conform.apply_changes(SimpleTable)
+    assert not isinstance(result, dbconform.ConformError), str(result)
     plan = result
     assert len(plan.steps) == 1
     assert "CREATE TABLE" in plan.sql()
-    recompare = sync.compare(SimpleTable)
-    assert not isinstance(recompare, modelsync.SyncError)
+    recompare = conform.compare(SimpleTable)
+    assert not isinstance(recompare, dbconform.ConformError)
     assert len(recompare.steps) == 0
 
 
-def test_compare_invalid_model_returns_sync_error(empty_db: tuple[str, str | None]) -> None:
-    """Passing a class with no __table__ returns SyncError (01-functional: Error handling)."""
+def test_compare_invalid_model_returns_conform_error(empty_db: tuple[str, str | None]) -> None:
+    """Passing a class with no __table__ returns ConformError (01-functional: Error handling)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
 
     class NotATable:
         """Plain class; no __table__, not a mapped model."""
 
-    result = sync.compare(NotATable)
-    assert isinstance(result, modelsync.SyncError)
+    result = conform.compare(NotATable)
+    assert isinstance(result, dbconform.ConformError)
     assert len(result.messages) >= 1
     assert len(result.target_objects) >= 1, (
-        "SyncError must identify which target failed (01-functional: Error handling)"
+        "ConformError must identify which target failed (01-functional: Error handling)"
     )
 
 
-def test_do_sync_apply_failure_returns_sync_error_with_target_objects(
+def test_apply_changes_apply_failure_returns_conform_error_with_target_objects(
     empty_sqlite_db: tuple[Path, str],
 ) -> None:
-    """When a plan step fails during apply (e.g. unsupported SQL on SQLite), do_sync returns
-    SyncError with target_objects (01-functional: Error handling)."""
+    """When a plan step fails during apply (e.g. unsupported SQL on SQLite), apply_changes returns
+    ConformError with target_objects (01-functional: Error handling)."""
     _path, url = empty_sqlite_db
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -176,19 +176,19 @@ def test_do_sync_apply_failure_returns_sync_error_with_target_objects(
     engine.dispose()
 
     # SimpleTableWithUnique adds UNIQUE(name); SQLite does not support ALTER TABLE ADD CONSTRAINT.
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=None)
-    result = sync.do_sync(SimpleTableWithUnique)
-    assert isinstance(result, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    result = conform.apply_changes(SimpleTableWithUnique)
+    assert isinstance(result, dbconform.ConformError)
     assert len(result.messages) >= 1
     assert len(result.target_objects) >= 1
     assert any(obj[0] == "table" or obj[0] == "step" for obj in result.target_objects)
 
 
-def test_do_sync_apply_failure_returns_sync_error_with_target_objects_postgres(
+def test_apply_changes_apply_failure_returns_conform_error_with_target_objects_postgres(
     empty_postgres_db: tuple[str, str],
 ) -> None:
     """When a plan step fails during apply (e.g. SET NOT NULL with existing NULLs),
-    do_sync returns SyncError with target_objects (01-functional: Error handling)."""
+    apply_changes returns ConformError with target_objects (01-functional: Error handling)."""
     url, schema = empty_postgres_db
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -206,34 +206,34 @@ def test_do_sync_apply_failure_returns_sync_error_with_target_objects_postgres(
     engine.dispose()
 
     # SimpleTable has name NOT NULL; DB has NULL in name. ALTER COLUMN SET NOT NULL fails.
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=schema)
-    result = sync.do_sync(SimpleTable)
-    assert isinstance(result, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=schema)
+    result = conform.apply_changes(SimpleTable)
+    assert isinstance(result, dbconform.ConformError)
     assert len(result.messages) >= 1
     assert len(result.target_objects) >= 1
     assert any(obj[0] == "table" or obj[0] == "step" for obj in result.target_objects)
 
 
-def test_do_sync_commit_per_step_succeeds(empty_db: tuple[str, str | None]) -> None:
-    """do_sync(..., commit_per_step=True) applies plan and commits after each step
+def test_apply_changes_commit_per_step_succeeds(empty_db: tuple[str, str | None]) -> None:
+    """apply_changes(..., commit_per_step=True) applies plan and commits after each step
     (01-functional: Transaction behavior)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    result = sync.do_sync(SimpleTable, commit_per_step=True)
-    assert not isinstance(result, modelsync.SyncError)
-    recompare = sync.compare(SimpleTable)
-    assert not isinstance(recompare, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    result = conform.apply_changes(SimpleTable, commit_per_step=True)
+    assert not isinstance(result, dbconform.ConformError)
+    recompare = conform.compare(SimpleTable)
+    assert not isinstance(recompare, dbconform.ConformError)
     assert len(recompare.steps) == 0
 
 
-def test_do_sync_emits_structured_logs_no_secrets(
+def test_apply_changes_emits_structured_logs_no_secrets(
     empty_db: tuple[str, str | None], capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Applied steps are logged as JSON lines to stdout; no secrets
     (02-non-functional: Observability)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    sync.do_sync(SimpleTable)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    conform.apply_changes(SimpleTable)
     out, _ = capsys.readouterr()
     lines = [ln.strip() for ln in out.strip().split("\n") if ln.strip()]
     assert len(lines) >= 1
@@ -252,13 +252,13 @@ def test_do_sync_emits_structured_logs_no_secrets(
         assert "credentials" not in rec
 
 
-def test_do_sync_log_file_written(empty_db: tuple[str, str | None], tmp_path: Path) -> None:
+def test_apply_changes_log_file_written(empty_db: tuple[str, str | None], tmp_path: Path) -> None:
     """Optional log_file receives same structured log lines
     (02-non-functional: optional log file)."""
     url, target_schema = empty_db
-    log_path = tmp_path / "modelsync.log"
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    sync.do_sync(SimpleTable, log_file=str(log_path))
+    log_path = tmp_path / "dbconform.log"
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    conform.apply_changes(SimpleTable, log_file=str(log_path))
     assert log_path.exists()
     content = log_path.read_text()
     lines = [ln.strip() for ln in content.strip().split("\n") if ln.strip()]
@@ -266,15 +266,15 @@ def test_do_sync_log_file_written(empty_db: tuple[str, str | None], tmp_path: Pa
     assert json.loads(lines[0]).get("event") == "apply_step"
 
 
-def test_do_sync_invalid_url_returns_sync_error() -> None:
-    """Invalid or unreachable DB URL yields SyncError with target_objects
+def test_apply_changes_invalid_url_returns_conform_error() -> None:
+    """Invalid or unreachable DB URL yields ConformError with target_objects
     (01-functional: Error handling)."""
-    sync = modelsync.ModelSync(
+    conform = dbconform.DbConform(
         credentials={"url": "postgresql://localhost:19999/nonexistent_db"},
         target_schema="public",
     )
-    result = sync.do_sync(SimpleTable)
-    assert isinstance(result, modelsync.SyncError)
+    result = conform.apply_changes(SimpleTable)
+    assert isinstance(result, dbconform.ConformError)
     assert len(result.messages) >= 1
     assert len(result.target_objects) >= 1
 
@@ -284,36 +284,36 @@ def test_compare_empty_model_list_returns_empty_plan(
 ) -> None:
     """compare([]) returns a plan with no steps and no extra_tables (empty model list)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    plan_or_err = sync.compare([])
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    plan_or_err = conform.compare([])
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
     assert len(plan_or_err.extra_tables) == 0
 
 
-def test_missing_index_do_sync_creates_index(
+def test_missing_index_apply_changes_creates_index(
     empty_db: tuple[str, str | None],
 ) -> None:
     """Model has index on column; DB has table but no index. Plan has CREATE INDEX;
-    do_sync applies (01-functional: add/remove indexes)."""
+    apply_changes applies (01-functional: add/remove indexes)."""
     url, target_schema = empty_db
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    sync.do_sync(SimpleTableWithIndex)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    conform.apply_changes(SimpleTableWithIndex)
     engine = create_engine(url)
     with engine.connect() as conn:
         conn.execute(text('DROP INDEX IF EXISTS "idx_simple_table_with_index_name"'))
         conn.commit()
     engine.dispose()
 
-    sync = modelsync.ModelSync(credentials={"url": url}, target_schema=target_schema)
-    plan_or_err = sync.compare(SimpleTableWithIndex)
-    assert not isinstance(plan_or_err, modelsync.SyncError)
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    plan_or_err = conform.compare(SimpleTableWithIndex)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 1
     assert "CREATE INDEX" in (plan_or_err.steps[0].sql or "")
     assert "idx_simple_table_with_index_name" in (plan_or_err.steps[0].sql or "")
 
-    result = sync.do_sync(SimpleTableWithIndex)
-    assert not isinstance(result, modelsync.SyncError)
-    recompare = sync.compare(SimpleTableWithIndex)
-    assert not isinstance(recompare, modelsync.SyncError)
+    result = conform.apply_changes(SimpleTableWithIndex)
+    assert not isinstance(result, dbconform.ConformError)
+    recompare = conform.compare(SimpleTableWithIndex)
+    assert not isinstance(recompare, dbconform.ConformError)
     assert len(recompare.steps) == 0

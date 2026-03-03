@@ -35,7 +35,7 @@ def test_from_models_does_not_mutate_caller_models() -> None:
     from sqlalchemy import Column, Integer, String
     from sqlalchemy.orm import DeclarativeBase
 
-    from modelsync.adapters.model_schema import ModelSchema
+    from dbconform.adapters.model_schema import ModelSchema
 
     class Base(DeclarativeBase):
         pass
@@ -57,7 +57,7 @@ def test_from_models_sequence_does_not_mutate() -> None:
     from sqlalchemy import Column, Integer, String
     from sqlalchemy.orm import DeclarativeBase
 
-    from modelsync.adapters.model_schema import ModelSchema
+    from dbconform.adapters.model_schema import ModelSchema
 
     class Base(DeclarativeBase):
         pass

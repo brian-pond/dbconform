@@ -2,7 +2,7 @@
 Shared test models used by unit and integration tests.
 
 Schema-only (table structure); names avoid "record" (row) to avoid confusion.
-Traceability: docs/requirements/01-functional.md — Model discovery, compare/sync.
+Traceability: docs/requirements/01-functional.md — Model discovery, compare/conform.
 """
 
 from sqlalchemy import Index, UniqueConstraint
@@ -10,7 +10,7 @@ from sqlmodel import Field, SQLModel
 
 
 class SimpleTable(SQLModel, table=True):
-    """One table, four columns. Used to drive compare/sync in tests."""
+    """One table, four columns. Used to drive compare/conform in tests."""
 
     __tablename__ = "simple_table"
 

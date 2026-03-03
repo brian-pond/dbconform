@@ -1,1 +1,1 @@
-# Tests for modelsync.plan
+# Tests for dbconform.plan

@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "modelsync"
+name = "dbconform"
 version = "0.1.0"
-description = "Synchronize database models with actuals — document-driven project."
+description = "Synchronize database schema to models — document-driven project."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -21,8 +21,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/brian-pond/modelsync"
-Repository = "https://github.com/brian-pond/modelsync"
+Homepage = "https://github.com/brian-pond/dbconform"
+Repository = "https://github.com/brian-pond/dbconform"
 
 [project.optional-dependencies]
 dev = [
@@ -38,7 +38,7 @@ postgres = [
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 110
 src = ["src"]
 
 [tool.ruff.lint]
@@ -49,4 +49,4 @@ ignore = []
 where = ["src"]
 
 [project.scripts]
-modelsync = "modelsync.cli:main"
+dbconform = "dbconform.cli:main"

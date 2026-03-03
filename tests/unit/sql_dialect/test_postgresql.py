@@ -4,14 +4,14 @@ Unit tests for PostgreSQLDialect DDL output.
 Traceability: docs/requirements/01-functional.md (Schema parity, Identifiers and quoting).
 """
 
-from modelsync.sql_dialect.postgresql import PostgreSQLDialect
-from modelsync.schema.objects import (
+from dbconform.schema.objects import (
     ColumnDef,
     PrimaryKeyDef,
     QualifiedName,
     TableDef,
     UniqueDef,
 )
+from dbconform.sql_dialect.postgresql import PostgreSQLDialect
 
 
 def test_postgresql_quote_identifier() -> None:

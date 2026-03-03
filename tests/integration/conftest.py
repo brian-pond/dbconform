@@ -1,7 +1,7 @@
 """
 Pytest fixtures for integration tests (SQLite, PostgreSQL).
 
-Strategy: tmp_path for SQLite; per-test DB for Postgres when MODELSYNC_TEST_POSTGRES_URL is set.
+Strategy: tmp_path for SQLite; per-test DB for Postgres when DBCONFORM_TEST_POSTGRES_URL is set.
 See docs/technical/01-test-database.md.
 """
 
@@ -34,7 +34,7 @@ def empty_sqlite_db(tmp_path: Path) -> tuple[Path, str]:
     Yields:
         (path, url): pathlib.Path to the .db file and SQLAlchemy URL string.
     """
-    db_path = tmp_path / "modelsync_test.db"
+    db_path = tmp_path / "dbconform_test.db"
     url = f"sqlite:///{db_path!s}"
     engine = create_engine(url)
     # Create the DB file by opening and closing a connection; then release it.
@@ -50,14 +50,14 @@ def empty_postgres_db() -> tuple[str, str]:
     """
     Provide an empty PostgreSQL database for the test.
 
-    Yields (url, target_schema). Skips if MODELSYNC_TEST_POSTGRES_URL is unset.
+    Yields (url, target_schema). Skips if DBCONFORM_TEST_POSTGRES_URL is unset.
     See docs/technical/01-test-database.md.
     """
-    env_url = os.environ.get("MODELSYNC_TEST_POSTGRES_URL")
+    env_url = os.environ.get("DBCONFORM_TEST_POSTGRES_URL")
     if not env_url:
         pytest.skip(
-            "PostgreSQL not available: set MODELSYNC_TEST_POSTGRES_URL "
-            "(e.g. run 'modelsync test postgres up' and use the printed URL)."
+            "PostgreSQL not available: set DBCONFORM_TEST_POSTGRES_URL "
+            "(e.g. run 'dbconform test postgres up' and use the printed URL)."
         )
     normalized = _normalize_postgres_url(env_url)
     parsed = make_url(normalized)
@@ -71,7 +71,7 @@ def empty_postgres_db() -> tuple[str, str]:
         database="postgres",
     )
 
-    test_db_name = "modelsync_test_" + uuid.uuid4().hex[:12]
+    test_db_name = "dbconform_test_" + uuid.uuid4().hex[:12]
     engine_admin = create_engine(admin_url)
     try:
         with engine_admin.connect() as conn:

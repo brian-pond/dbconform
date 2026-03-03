@@ -1,12 +1,12 @@
 """
-Public schema API; re-exports from modelsync.internal, modelsync.adapters, modelsync.compare.
+Public schema API; re-exports from dbconform.internal, dbconform.adapters, dbconform.compare.
 
 See docs/technical/02-architecture.md (Package layout).
 """
 
-from modelsync.compare import DatabaseSchema, DiffResult, SchemaDiffer, TableDiff, differences
-from modelsync.adapters import ModelSchema, sa_column_to_neutral_type
-from modelsync.internal import (
+from dbconform.adapters import ModelSchema, sa_column_to_neutral_type
+from dbconform.compare import DatabaseSchema, DiffResult, SchemaDiffer, TableDiff, differences
+from dbconform.internal import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,

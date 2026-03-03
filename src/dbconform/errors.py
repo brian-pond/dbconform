@@ -1,5 +1,5 @@
 """
-Structured error for sync/compare failures.
+Structured error for conform/compare failures.
 
 Callers can determine which target objects failed and why. See
 docs/requirements/01-functional.md (Error handling).
@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
-class SyncError:
+class ConformError:
     """
-    Structured error returned when sync or compare fails.
+    Structured error returned when conform or compare fails.
 
     target_objects: list of (object_type, identifier) e.g. ("table", "public.foo").
     messages: human-readable reason(s). One entry per object or a single summary.
@@ -24,5 +24,5 @@ class SyncError:
 
     def __str__(self) -> str:
         if not self.messages:
-            return "SyncError(no messages)"
+            return "ConformError(no messages)"
         return "; ".join(self.messages)

@@ -1,1 +1,1 @@
-# Integration tests for modelsync
+# Integration tests for dbconform

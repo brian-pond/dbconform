@@ -7,8 +7,7 @@ See docs/requirements/01-functional.md (Schema parity scope).
 
 from __future__ import annotations
 
-from modelsync.sql_dialect.base import Dialect
-from modelsync.internal.objects import (
+from dbconform.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -16,6 +15,7 @@ from modelsync.internal.objects import (
     TableDef,
     UniqueDef,
 )
+from dbconform.sql_dialect.base import Dialect
 
 
 class SQLiteDialect(Dialect):

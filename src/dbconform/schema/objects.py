@@ -1,6 +1,6 @@
-"""Re-export internal schema objects. Canonical: modelsync.internal.objects."""
+"""Re-export internal schema objects. Canonical: dbconform.internal.objects."""
 
-from modelsync.internal.objects import (
+from dbconform.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,

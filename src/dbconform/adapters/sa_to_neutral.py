@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from modelsync.internal.types import (
+from dbconform.internal.types import (
     CanonicalType,
     canonical_char,
     canonical_numeric,

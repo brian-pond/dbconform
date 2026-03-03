@@ -27,18 +27,18 @@ How we provide real SQL databases for tests without polluting the filesystem or 
 ## PostgreSQL (implemented)
 
 - **Fixture** `empty_postgres_db` (in `tests/integration/conftest.py`): yields `(url, target_schema)` for an empty PostgreSQL database. **Isolation**: a unique database is created per test and dropped on teardown (AUTOCOMMIT for CREATE/DROP DATABASE).
-- **Source**: Set **`MODELSYNC_TEST_POSTGRES_URL`** (e.g. from `modelsync test postgres up` output). The fixture connects to the `postgres` database to create/drop the per-test database. Use for CI, local installs, or the CLI container.
+- **Source**: Set **`DBCONFORM_TEST_POSTGRES_URL`** (e.g. from `dbconform test postgres up` output). The fixture connects to the `postgres` database to create/drop the per-test database. Use for CI, local installs, or the CLI container.
 - **Skip**: If the env URL is not set, tests that depend on `empty_postgres_db` are skipped (e.g. parametrized postgres runs are skipped).
-- **Optional deps**: Install with `uv sync --all-extras` or `pip install -e ".[postgres]"` to get **psycopg** (driver). See [00-libraries-packages.md](00-libraries-packages.md).
+- **Optional deps**: Install with `uv conform --all-extras` or `pip install -e ".[postgres]"` to get **psycopg** (driver). See [00-libraries-packages.md](00-libraries-packages.md).
 
 ## Test CLI (recommended workflow)
 
-The **modelsync test** CLI provides a single entry point for the test workflow and clear exit codes when Postgres is unavailable:
+The **dbconform test** CLI provides a single entry point for the test workflow:
 
-- **`modelsync test check-container`** — Verifies the container runtime (Docker or Podman) and the Postgres image: runs a short-lived container (`pg_isready`), then removes it. Exit 0 on success; exit 1 with a clear message on failure (runtime not found, image pull failed, container start failed). Use **`MODELSYNC_CONTAINER_CMD`** (e.g. `docker` or `podman`) to choose the binary, or rely on auto-detection (docker then podman in PATH).
-- **`modelsync test postgres up`** — Starts a long-lived Postgres container named `modelsync-postgres` on host port 5433 (image `postgres:16-alpine`). Prints `MODELSYNC_TEST_POSTGRES_URL=postgresql://postgres:postgres@127.0.0.1:5433/postgres` to set before running tests. Exit 1 if the container already exists or start fails.
-- **`modelsync test postgres down`** — Stops and removes the long-lived container. Idempotent if the container does not exist.
-- **`modelsync test run`** — Runs the test suite (pytest on `tests/`). **Exit codes:** 0 = all tests passed; 1 = test failure (or pytest invocation failed); **2** = tests were skipped because Postgres was not available (message instructs the user to run `check-container`, `postgres up`, set the URL, then `test run` again). Optional fail-fast: if `MODELSYNC_TEST_POSTGRES_URL` is unset and the perpetual container is not running, exit 2 immediately so the user knows before waiting for pytest.
+- **`dbconform test run`** — Runs the test suite. **With [postgres] extra and Docker/Podman:** automatically starts the Postgres container, runs tests (SQLite + PostgreSQL), stops the container. **Otherwise:** runs SQLite tests only; no error about missing psycopg. **Exit codes:** 0 = all tests passed; 1 = test failure.
+- **`dbconform test check-container`** — Verifies the container runtime (Docker or Podman) and the Postgres image: runs a short-lived container (`pg_isready`), then removes it. Exit 0 on success; exit 1 with a clear message on failure (runtime not found, image pull failed, container start failed). Use **`DBCONFORM_CONTAINER_CMD`** (e.g. `docker` or `podman`) to choose the binary, or rely on auto-detection (docker then podman in PATH).
+- **`dbconform test postgres up`** — Starts a long-lived Postgres container named `dbconform-postgres` on host port 15432 (image `postgres:16-alpine`). Prints `DBCONFORM_TEST_POSTGRES_URL=postgresql://postgres:postgres@127.0.0.1:15432/postgres` to set before running tests. Exit 1 if the container already exists or start fails.
+- **`dbconform test postgres down`** — Stops and removes the long-lived container. Idempotent if the container does not exist.
 
 ## Options (MariaDB and other)
 
@@ -54,7 +54,7 @@ The **modelsync test** CLI provides a single entry point for the test workflow a
 - **Idea**: Use a hosted MariaDB/PostgreSQL instance (e.g. provider-managed DB or ephemeral “test” instances) and pass the URL via env or config.
 - **Pros**: No container orchestration; can match production-like versions and features.
 - **Cons**: Network and credentials; cost; vendor lock-in if tests assume one provider; secrets must not appear in logs (02-non-functional). The project is **cloud-agnostic**—tests should not *require* a specific cloud.
-- **Suggestion**: If used, keep it optional (e.g. run PostgreSQL/MariaDB tests only when `MODELSYNC_TEST_POSTGRES_URL` or similar is set). Document that Docker/local is the primary recommended way to run multi-backend tests.
+- **Suggestion**: If used, keep it optional (e.g. run PostgreSQL/MariaDB tests only when `DBCONFORM_TEST_POSTGRES_URL` or similar is set). Document that Docker/local is the primary recommended way to run multi-backend tests.
 
 ### Other
 
@@ -63,4 +63,4 @@ The **modelsync test** CLI provides a single entry point for the test workflow a
 
 ## Summary
 
-SQLite uses tmp_path and `empty_sqlite_db` (one DB file per test). PostgreSQL uses `empty_postgres_db` and `MODELSYNC_TEST_POSTGRES_URL` (per-test database; see "PostgreSQL (implemented)" above). MariaDB is not yet implemented; the same pattern (env URL or container, per-test DB/schema) applies when added.
+SQLite uses tmp_path and `empty_sqlite_db` (one DB file per test). PostgreSQL uses `empty_postgres_db` and `DBCONFORM_TEST_POSTGRES_URL` (per-test database; see "PostgreSQL (implemented)" above). MariaDB is not yet implemented; the same pattern (env URL or container, per-test DB/schema) applies when added.

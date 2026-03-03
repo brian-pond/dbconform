@@ -5,7 +5,7 @@ No dependency on SQLAlchemy, Django, or other ORMs. See docs/technical/02-archit
 (Core functions, Internal schema).
 """
 
-from modelsync.internal.objects import (
+from dbconform.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -15,7 +15,7 @@ from modelsync.internal.objects import (
     TableDef,
     UniqueDef,
 )
-from modelsync.internal.types import (
+from dbconform.internal.types import (
     CanonicalType,
     canonical_char,
     canonical_numeric,

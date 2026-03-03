@@ -1,5 +1,5 @@
 """
-Build an ordered SyncPlan from a DiffResult and dialect.
+Build an ordered ConformPlan from a DiffResult and dialect.
 
 Respects dependency order (create referenced tables before tables with FKs)
 and options (no drops by default; extra tables reported only).
@@ -10,17 +10,17 @@ from __future__ import annotations
 
 from collections import deque
 
-from modelsync.sql_dialect.base import Dialect
-from modelsync.plan.steps import (
+from dbconform.compare.diff import DiffResult
+from dbconform.internal.objects import QualifiedName, TableDef
+from dbconform.plan.steps import (
     AlterTableStep,
+    ConformPlan,
+    ConformStep,
     CreateIndexStep,
     CreateTableStep,
     DropTableStep,
-    SyncPlan,
-    SyncStep,
 )
-from modelsync.compare.diff import DiffResult
-from modelsync.internal.objects import QualifiedName, TableDef
+from dbconform.sql_dialect.base import Dialect
 
 
 def _topological_table_order(
@@ -58,9 +58,9 @@ def _topological_table_order(
     return result
 
 
-class SyncPlanBuilder:
+class ConformPlanBuilder:
     """
-    Builds a SyncPlan from DiffResult and dialect.
+    Builds a ConformPlan from DiffResult and dialect.
 
     Does not emit DROP TABLE unless allow_drop_table is True. Does not emit
     DROP COLUMN unless allow_drop_column is True. Does not emit ALTER COLUMN
@@ -86,9 +86,9 @@ class SyncPlanBuilder:
         self.allow_shrink_column = allow_shrink_column
         self.report_extra_tables = report_extra_tables
 
-    def build(self, diff: DiffResult) -> SyncPlan:
-        """Produce an ordered SyncPlan from the diff."""
-        steps: list[SyncStep] = []
+    def build(self, diff: DiffResult) -> ConformPlan:
+        """Produce an ordered ConformPlan from the diff."""
+        steps: list[ConformStep] = []
         extra_tables: list[QualifiedName] = []
 
         if self.report_extra_tables:
@@ -238,4 +238,4 @@ class SyncPlanBuilder:
                     )
                 )
 
-        return SyncPlan(steps=steps, extra_tables=extra_tables)
+        return ConformPlan(steps=steps, extra_tables=extra_tables)

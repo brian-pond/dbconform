@@ -1,5 +1,5 @@
 ---
-description: How to run tests (use modelsync test run)
+description: How to run tests (use dbconform test run)
 alwaysApply: true
 ---
 
@@ -8,7 +8,7 @@ alwaysApply: true
 When running unit tests or the full test suite, use the same command as the project owner:
 
 ```bash
-cd /home/sysop/projects/python/modelsync && uv run modelsync test run 2>&1
+cd /home/sysop/projects/python/dbconform && uv run dbconform test run 2>&1
 ```
 
-Do not use `uv run pytest tests/unit/` or raw `pytest` for test runs; use **`uv run modelsync test run`** so the test CLI handles the environment and output consistently.
+Do not use `uv run pytest tests/unit/` or raw `pytest` for test runs; use **`uv run dbconform test run`** so the test CLI handles the environment and output consistently.

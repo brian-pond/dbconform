@@ -6,4 +6,4 @@ alwaysApply: false
 ## Third Party Packages and Libraries
 - Technical documentation is located in @docs/technical/00-libraries-packages.md
 - When changes are made to either @pyproject.toml or @docs/technical/00-libraries-packages.md, ensure both files are in agreement.
-- Whenever you add, remove, or change packages or libraries in [pyproject.toml](pyproject.toml), immediately run the following from the project root so the environment and linters stay in sync: **activate the project virtual environment** (e.g. `source .venv/bin/activate`), then run `pip install -e ".[dev]"`
+- Whenever you add, remove, or change packages or libraries in [pyproject.toml](pyproject.toml), immediately run the following from the project root so the environment and linters stay synchronized: **activate the project virtual environment** (e.g. `source .venv/bin/activate`), then run `pip install -e ".[dev]"`

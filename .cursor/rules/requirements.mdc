@@ -7,7 +7,7 @@ alwaysApply: true
 
 Project requirements live under **docs/requirements/**. They are the single source of truth for what the system should do and how it should behave.
 
-**Cloud agnostic:** modelsync and its requirements are **cloud agnostic**. Deployment, secrets management, and infrastructure choices are not tied to a specific cloud provider (e.g. no requirement to use AWS, Azure, or Google). Examples and recommendations in the requirement docs use vendor-neutral or multi-vendor options where applicable.
+**Cloud agnostic:** dbconform and its requirements are **cloud agnostic**. Deployment, secrets management, and infrastructure choices are not tied to a specific cloud provider (e.g. no requirement to use AWS, Azure, or Google). Examples and recommendations in the requirement docs use vendor-neutral or multi-vendor options where applicable.
 
 ## Documents in docs/requirements/
 

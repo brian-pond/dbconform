@@ -1,5 +1,5 @@
 """
-Sync plan step types and SyncPlan container.
+Conform plan step types and ConformPlan container.
 
 Each step has a description and SQL (or None for no-op/report-only).
 See docs/requirements/01-functional.md (Plan and DDL order).
@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from modelsync.internal.objects import (
+from dbconform.internal.objects import (
     ColumnDef,
     IndexDef,
     QualifiedName,
@@ -21,8 +21,8 @@ from modelsync.internal.objects import (
 
 
 @dataclass(slots=True)
-class SyncStep:
-    """Single step in a sync plan (DDL or data op)."""
+class ConformStep:
+    """Single step in a conform plan (DDL or data op)."""
 
     description: str
     sql: str | None = None
@@ -34,14 +34,14 @@ class SyncStep:
 
 
 @dataclass(slots=True)
-class CreateTableStep(SyncStep):
+class CreateTableStep(ConformStep):
     """Create a table (columns + table-level constraints)."""
 
     table: TableDef = field(default_factory=lambda: TableDef(name=QualifiedName(None, "")))
 
 
 @dataclass(slots=True)
-class AlterTableStep(SyncStep):
+class AlterTableStep(ConformStep):
     """Alter a table (add/alter column, add constraint, etc.)."""
 
     table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
@@ -52,7 +52,7 @@ class AlterTableStep(SyncStep):
 
 
 @dataclass(slots=True)
-class CreateIndexStep(SyncStep):
+class CreateIndexStep(ConformStep):
     """Create an index."""
 
     index: IndexDef = field(
@@ -62,14 +62,14 @@ class CreateIndexStep(SyncStep):
 
 
 @dataclass(slots=True)
-class DropTableStep(SyncStep):
+class DropTableStep(ConformStep):
     """Drop a table. Emitted only when allow_drop_table=True (01-functional: Opt-in flags)."""
 
     table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
 
 
 @dataclass(slots=True)
-class SyncPlan:
+class ConformPlan:
     """
     Ordered list of DDL and data-operation steps plus optional extra tables.
 
@@ -77,10 +77,10 @@ class SyncPlan:
     in DB but not in model (reported only; no DROP unless opt-in).
     """
 
-    steps: list[SyncStep] = field(default_factory=list)
+    steps: list[ConformStep] = field(default_factory=list)
     extra_tables: list[QualifiedName] = field(default_factory=list)
 
-    def __iter__(self) -> Iterator[SyncStep]:
+    def __iter__(self) -> Iterator[ConformStep]:
         return iter(self.steps)
 
     def sql(self) -> str:

@@ -14,7 +14,7 @@
 
 ## Deployment
 - **Platform**: Linux only for Phase 1. Other platforms may be best-effort or added later.
-- **Distribution**: Package is published to PyPI and installable via `pip install modelsync` (or the package name as published).
+- **Distribution**: Package is published to PyPI and installable via `pip install dbconform` (or the package name as published).
 
 ## Observability
 

@@ -1,5 +1,5 @@
 """
-Unit tests for SyncPlanBuilder.
+Unit tests for ConformPlanBuilder.
 
 Traceability: docs/requirements/01-functional.md (Plan and DDL order,
 Destructive changes, Opt-in flags). Extra tables from removed_tables;
@@ -9,16 +9,16 @@ control destructive steps.
 
 from collections import OrderedDict
 
-from modelsync.sql_dialect.sqlite import SQLiteDialect
-from modelsync.plan.builder import SyncPlanBuilder
-from modelsync.plan.steps import DropTableStep, SyncPlan
-from modelsync.schema.diff import DiffResult, TableDiff
-from modelsync.schema.objects import ColumnDef, IndexDef, QualifiedName, TableDef
+from dbconform.plan.builder import ConformPlanBuilder
+from dbconform.plan.steps import ConformPlan, DropTableStep
+from dbconform.schema.diff import DiffResult, TableDiff
+from dbconform.schema.objects import ColumnDef, IndexDef, QualifiedName, TableDef
+from dbconform.sql_dialect.sqlite import SQLiteDialect
 
 
-def test_sync_plan_statements_and_sql() -> None:
-    """SyncPlan.statements() returns step SQL list; .sql() returns concatenated SQL."""
-    plan = SyncPlan(steps=[], extra_tables=[])
+def test_conform_plan_statements_and_sql() -> None:
+    """ConformPlan.statements() returns step SQL list; .sql() returns concatenated SQL."""
+    plan = ConformPlan(steps=[], extra_tables=[])
     assert plan.statements() == []
     assert plan.sql() == ""
 
@@ -40,7 +40,7 @@ def test_builder_added_table_produces_create_step() -> None:
         removed_tables=OrderedDict(),
         modified_tables=OrderedDict(),
     )
-    plan = SyncPlanBuilder(SQLiteDialect()).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect()).build(diff)
     assert len(plan.steps) == 1
     assert "CREATE TABLE" in (plan.steps[0].sql or "")
     assert "foo" in (plan.steps[0].sql or "")
@@ -63,7 +63,7 @@ def test_builder_removed_table_in_extra_no_drop() -> None:
         ),
         modified_tables=OrderedDict(),
     )
-    plan = SyncPlanBuilder(SQLiteDialect(), report_extra_tables=True).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), report_extra_tables=True).build(diff)
     assert len(plan.steps) == 0
     assert len(plan.extra_tables) == 1
     assert plan.extra_tables[0].name == "orphan"
@@ -87,7 +87,7 @@ def test_builder_removed_table_drop_when_allow_drop_table() -> None:
         ),
         modified_tables=OrderedDict(),
     )
-    plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_table=True).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_table=True).build(diff)
     assert len(plan.steps) == 1
     assert isinstance(plan.steps[0], DropTableStep)
     assert plan.steps[0].table_name.name == "orphan"
@@ -125,7 +125,7 @@ def test_builder_removed_column_drop_when_allow_drop_column() -> None:
             ]
         ),
     )
-    plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_column=True).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_column=True).build(diff)
     assert len(plan.steps) == 1
     assert "DROP COLUMN" in (plan.steps[0].sql or "")
     assert "extra" in (plan.steps[0].sql or "")
@@ -176,10 +176,10 @@ def test_builder_alter_shrink_skipped_without_allow_shrink_column() -> None:
         def alter_column_sql(self, _table_name, _old_column, _new_column):
             return 'ALTER TABLE "t" ALTER COLUMN "name" VARCHAR(255)'
 
-    plan_no_shrink = SyncPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=False).build(diff)
+    plan_no_shrink = ConformPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=False).build(diff)
     assert len(plan_no_shrink.steps) == 0
 
-    plan_allow_shrink = SyncPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=True).build(
+    plan_allow_shrink = ConformPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=True).build(
         diff
     )
     assert len(plan_allow_shrink.steps) == 1
@@ -219,14 +219,14 @@ def test_builder_report_extra_tables_false() -> None:
         ),
         modified_tables=OrderedDict(),
     )
-    plan = SyncPlanBuilder(SQLiteDialect(), report_extra_tables=False).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), report_extra_tables=False).build(diff)
     assert len(plan.extra_tables) == 0
 
 
 def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
     """Modified table with removed index -> DROP INDEX when allow_drop_constraint=True (default)
     (01-functional: add/remove constraints)."""
-    from modelsync.schema.diff import TableDiff
+    from dbconform.schema.diff import TableDiff
 
     qualified = QualifiedName(None, "t")
     old_table = TableDef(
@@ -255,7 +255,7 @@ def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
             ]
         ),
     )
-    plan = SyncPlanBuilder(SQLiteDialect()).build(diff)  # default allow_drop_constraint=True
+    plan = ConformPlanBuilder(SQLiteDialect()).build(diff)  # default allow_drop_constraint=True
     assert len(plan.steps) == 1
     assert "DROP INDEX" in (plan.steps[0].sql or "")
     assert "idx_t_id" in (plan.steps[0].sql or "")
@@ -263,7 +263,7 @@ def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
 
 def test_builder_removed_index_no_drop_when_allow_drop_constraint_false() -> None:
     """Modified table with removed index -> no DROP step when allow_drop_constraint=False."""
-    from modelsync.schema.diff import TableDiff
+    from dbconform.schema.diff import TableDiff
 
     qualified = QualifiedName(None, "t")
     old_table = TableDef(
@@ -292,13 +292,13 @@ def test_builder_removed_index_no_drop_when_allow_drop_constraint_false() -> Non
             ]
         ),
     )
-    plan = SyncPlanBuilder(SQLiteDialect(), allow_drop_constraint=False).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_constraint=False).build(diff)
     assert len(plan.steps) == 0
 
 
 def test_builder_fk_order_parent_before_child() -> None:
     """Two added tables with FK: parent created before child (topological order)."""
-    from modelsync.schema.objects import ForeignKeyDef
+    from dbconform.schema.objects import ForeignKeyDef
 
     parent_name = QualifiedName(None, "parent")
     child_name = QualifiedName(None, "child")
@@ -331,7 +331,7 @@ def test_builder_fk_order_parent_before_child() -> None:
         removed_tables=OrderedDict(),
         modified_tables=OrderedDict(),
     )
-    plan = SyncPlanBuilder(SQLiteDialect()).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect()).build(diff)
     assert len(plan.steps) == 2
     assert "parent" in (plan.steps[0].sql or "")
     assert "child" in (plan.steps[1].sql or "")

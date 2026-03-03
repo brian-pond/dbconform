@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import re
 
-from modelsync.sql_dialect.base import Dialect
-from modelsync.internal.types import CanonicalType
-from modelsync.internal.objects import (
+from dbconform.internal.objects import (
     CheckDef,
     ColumnDef,
     ForeignKeyDef,
@@ -20,6 +18,8 @@ from modelsync.internal.objects import (
     TableDef,
     UniqueDef,
 )
+from dbconform.internal.types import CanonicalType
+from dbconform.sql_dialect.base import Dialect
 
 
 class PostgreSQLDialect(Dialect):
