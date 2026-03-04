@@ -17,6 +17,7 @@
   - **Pass an existing DB connection** (that they created), or
   - **Pass credentials** so that dbconform creates and uses the connection.
 - When the caller passes **credentials** (not a connection), dbconform **opens** the connection, runs the conform, and **closes** the connection. The caller does not manage connection lifecycle in that case.
+- **SQLite :memory:** When credentials use a SQLite in-memory URL (`:memory:`), dbconform rewrites it to use shared cache (`?cache=shared`) so multiple `compare()` or `apply_changes()` calls share one logical database instead of each creating a fresh empty DB.
 - **Sync and async:** `DbConform` accepts sync `Connection` (or credentials with sync URLs like `sqlite:///`, `postgresql+psycopg://`). `AsyncDbConform` accepts async `AsyncConnection` (or credentials with async URLs like `sqlite+aiosqlite:///`, `postgresql+asyncpg://`). Sync URLs must not be passed to `AsyncDbConform`; async URLs must not be passed to `DbConform`.
 
 ### Target schema
@@ -39,6 +40,7 @@
 
 ### Transaction behavior
 - Transaction behavior is **configurable**. **Default:** all-or-nothing—if any step fails during apply, the entire conform is rolled back. **Option:** `commit_per_step=True` on `apply_changes()` commits after each step so that prior steps persist if a later step fails.
+- **Transaction-awareness**: When the connection is already in a transaction (e.g. from `engine.begin()` or after compare via `engine.connect()`), dbconform uses a savepoint for the apply block instead of a new transaction. Both `engine.connect()` and `engine.begin()` are supported. See [docs/technical/03-transactions-and-savepoints.md](../technical/03-transactions-and-savepoints.md).
 
 ### Plan and DDL order
 - DDL and data-operation steps must be produced in a **valid execution order**: dependencies must be respected (e.g. create table before creating a foreign key that references it). Documentation and implementation must reflect this.

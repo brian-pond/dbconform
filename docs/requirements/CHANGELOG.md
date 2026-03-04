@@ -5,6 +5,15 @@ All notable changes to the requirements docs are documented here.
 ## [Unreleased]
 
 ### Added
+- **Transaction-awareness:** When the connection is already in a transaction (e.g. from `engine.begin()`), `apply_changes()` uses a savepoint for the apply block instead of calling `connection.begin()`. Both `engine.connect()` and `engine.begin()` are supported. See 01-functional (Transaction behavior).
+- **SQLite :memory: shared cache:** When using credentials with `sqlite:///:memory:` or `sqlite+aiosqlite:///:memory:`, the URL is rewritten to use `?cache=shared` so multiple `compare()` / `apply_changes()` calls share one logical in-memory database. See 01-functional (Database connection).
+- **Indexes on new tables:** The plan builder now emits `CreateIndexStep` for indexes on newly added tables, so one `apply_changes()` run fully syncs new tables and their indexes (previously required a second pass).
+- **emit_log option:** `apply_changes()` accepts `emit_log=False` to suppress JSON-line logs to stdout. Useful when the caller manages logging. `log_file` still appends when provided. See 02-non-functional (Observability).
+
+### Changed
+- **ConformError:** Now inherits from `Exception`, allowing `raise X from conform_error` and `except ConformError`. The API still returns it as a value; `isinstance(result, ConformError)` continues to work as before.
+
+### Added (earlier)
 - **Async support:** `AsyncDbConform` for async database connections. Pass `async_connection` (SQLAlchemy `AsyncConnection`) or `credentials` with async driver URLs (`sqlite+aiosqlite://`, `postgresql+asyncpg://`). Use `await conform.compare()` and `await conform.apply_changes()`. Optional `[async]` extra provides `aiosqlite` and `asyncpg`. See 01-functional (Database connection) and README.
 
 ### Changed

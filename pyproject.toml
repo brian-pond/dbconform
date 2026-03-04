@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbconform"
-version = "0.1.2"
+version = "0.1.4"
 description = "Synchronize database schema to models — document-driven project."
 readme = "README.md"
 license = { text = "MIT" }

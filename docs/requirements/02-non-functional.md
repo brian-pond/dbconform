@@ -19,8 +19,9 @@
 ## Observability
 
 ### Auditability and logging
-- **Minimum**: All applied changes (and relevant dry-run outcomes) are emitted as **structured** logs to **stdout** so that runs can be audited and consumed by log aggregators or CI. The format must be **machine-parseable** (e.g. JSON lines) to support tooling and CI.
-- **Optional**: An option must exist to **also** write the same (or a human-readable) log to a **text file**, for local audit trails or archival.
+- **Minimum**: All applied changes (and relevant dry-run outcomes) are emitted as **structured** logs to **stdout** when `emit_log=True` (default on `apply_changes()`). The format must be **machine-parseable** (e.g. JSON lines) to support tooling and CI.
+- **Optional**: `emit_log=False` on `apply_changes()` suppresses stdout emission (for library use when the caller manages logging elsewhere). When set, `log_file` can still be used to append to a file.
+- **Optional**: An option must exist to **also** write the same (or a human-readable) log to a **text file** via `log_file`, for local audit trails or archival.
 
 ## Acceptance criteria (non-functional)
 - Logs are structured and machine-parseable; no secrets appear in logs. Package is installable on Linux via pip (PyPI). Public API is documented (e.g. README and API reference).

@@ -166,6 +166,43 @@ def test_apply_changes_func_now_default_sqlite_compatible(
     assert " DEFAULT now()" not in sql and "DEFAULT now()" not in sql
 
 
+def test_apply_changes_check_constraint_in_clause_no_postcompile(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """CHECK with IN(enum_values) must emit literals, not __[POSTCOMPILE_param_1] placeholders."""
+    from sqlalchemy import CheckConstraint, Column, Integer, String
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.sql import column
+
+    class Base(DeclarativeBase):
+        pass
+
+    class ExecutionLanes(Base):
+        __tablename__ = "execution_lanes"
+        id = Column(Integer, primary_key=True)
+        concurrency_mode = Column(String(50), nullable=False)
+        priority = Column(String(50), nullable=False)
+        __table_args__ = (
+            CheckConstraint(
+                column("concurrency_mode").in_(["sequential", "parallel"]),
+                name="concurrencymode",
+            ),
+            CheckConstraint(
+                column("priority").in_(["high", "low", "normal"]),
+                name="lanepriority",
+            ),
+        )
+
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    result = conform.apply_changes(ExecutionLanes)
+    assert not isinstance(result, dbconform.ConformError), str(result)
+    sql = result.sql()
+    assert "__[POSTCOMPILE" not in sql
+    assert "concurrency_mode" in sql or "concurrencymode" in sql
+    assert "'sequential'" in sql and "'parallel'" in sql
+
+
 def test_compare_invalid_model_returns_conform_error(empty_db: tuple[str, str | None]) -> None:
     """Passing a class with no __table__ returns ConformError (01-functional: Error handling)."""
     url, target_schema = empty_db
@@ -275,6 +312,17 @@ def test_apply_changes_emits_structured_logs_no_secrets(
         assert "credentials" not in rec
 
 
+def test_apply_changes_emit_log_false_suppresses_stdout(
+    empty_db: tuple[str, str | None], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """emit_log=False suppresses apply-step logs to stdout (02-non-functional)."""
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    conform.apply_changes(SimpleTable, emit_log=False)
+    out, _ = capsys.readouterr()
+    assert "apply_step" not in out
+
+
 def test_apply_changes_log_file_written(empty_db: tuple[str, str | None], tmp_path: Path) -> None:
     """Optional log_file receives same structured log lines
     (02-non-functional: optional log file)."""
@@ -312,6 +360,53 @@ def test_compare_empty_model_list_returns_empty_plan(
     assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
     assert len(plan_or_err.extra_tables) == 0
+
+
+def test_apply_changes_with_connection_from_engine_begin_succeeds(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """When caller passes connection from engine.begin(), apply_changes uses a savepoint
+    and succeeds (transaction-aware; 01-functional: Transaction behavior)."""
+    url, target_schema = empty_db
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conform = dbconform.DbConform(connection=conn, target_schema=target_schema)
+        result = conform.apply_changes(SimpleTable)
+    engine.dispose()
+    assert not isinstance(result, dbconform.ConformError), str(result)
+
+
+def test_new_table_with_index_single_apply_syncs_both(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """New table with indexes: one apply_changes creates both table and indexes
+    (previously required two passes)."""
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    result = conform.apply_changes(SimpleTableWithIndex)
+    assert not isinstance(result, dbconform.ConformError), str(result)
+    recompare = conform.compare(SimpleTableWithIndex)
+    assert not isinstance(recompare, dbconform.ConformError)
+    assert len(recompare.steps) == 0  # parity in single pass
+
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        if target_schema:
+            idx_query = text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname = :schema AND tablename = 'simple_table_with_index'"
+            )
+            rows = conn.execute(idx_query, {"schema": target_schema}).fetchall()
+        else:
+            rows = conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'index' AND tbl_name = 'simple_table_with_index'"
+                )
+            ).fetchall()
+    engine.dispose()
+    index_names = [r[0] for r in rows]
+    assert "idx_simple_table_with_index_name" in index_names
 
 
 def test_missing_index_apply_changes_creates_index(

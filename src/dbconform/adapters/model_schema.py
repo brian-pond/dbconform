@@ -50,6 +50,25 @@ def _column_type_str(column: Any, dialect: Dialect | None) -> str:
     return column.type.compile(dialect=dialect)
 
 
+def _check_expression_str(sqltext: Any) -> str:
+    """
+    Compile CHECK constraint expression to string with literal values.
+
+    SQLAlchemy's IN(...) with enum/list values uses POSTCOMPILE placeholders
+    (e.g. __[POSTCOMPILE_param_1]); those must be expanded to literals for
+    DDL execution. Use literal_binds=True to inline values.
+    """
+    if hasattr(sqltext, "compile"):
+        from sqlalchemy.dialects import postgresql
+
+        compiled = sqltext.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+        return str(compiled)
+    return str(sqltext)
+
+
 def _default_expr(column: Any, _dialect: Dialect) -> str | None:
     """Return server default expression as string, or None."""
     default = getattr(column, "server_default", None) or getattr(column, "default", None)
@@ -117,7 +136,7 @@ def _extract_table_def(
                     )
                 )
             case CheckConstraint():
-                expression = str(constraint.sqltext)
+                expression = _check_expression_str(constraint.sqltext)
                 check_constraints.append(CheckDef(name=constraint.name, expression=expression))
             case ForeignKeyConstraint():
                 ref_col = next(iter(constraint.elements)).column

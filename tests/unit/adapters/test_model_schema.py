@@ -77,3 +77,43 @@ def test_from_models_sequence_does_not_mutate() -> None:
     ModelSchema.from_models([A, B])
     assert _table_fingerprint(A.__table__) == fp_a_before
     assert _table_fingerprint(B.__table__) == fp_b_before
+
+
+def test_check_constraint_in_clause_expands_to_literals() -> None:
+    """
+    CHECK constraints with IN(enum_values) must expand to literals, not POSTCOMPILE placeholders.
+
+    SQLAlchemy emits __[POSTCOMPILE_param_1] for IN(); raw DDL execution would fail.
+    """
+    from sqlalchemy import CheckConstraint, Column, Integer, String
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.sql import column
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class TableWithEnumCheck(Base):
+        __tablename__ = "execution_lanes"
+        id = Column(Integer, primary_key=True)
+        concurrency_mode = Column(String(50), nullable=False)
+        priority = Column(String(50), nullable=False)
+        __table_args__ = (
+            CheckConstraint(
+                column("concurrency_mode").in_(["sequential", "parallel"]),
+                name="concurrencymode",
+            ),
+            CheckConstraint(
+                column("priority").in_(["high", "low", "normal"]),
+                name="lanepriority",
+            ),
+        )
+
+    schema = ModelSchema.from_models(TableWithEnumCheck)
+    table_def = next(iter(schema.tables.values()))
+    for ck in table_def.check_constraints:
+        assert "__[POSTCOMPILE" not in ck.expression, f"Placeholder in {ck.name}: {ck.expression}"
+        assert "IN (" in ck.expression
+        # Values should be literal strings
+        assert "'sequential'" in ck.expression or "'high'" in ck.expression or "'parallel'" in ck.expression

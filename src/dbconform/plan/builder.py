@@ -122,6 +122,16 @@ class ConformPlanBuilder:
                     table=table,
                 )
             )
+            for idx in table.indexes:
+                idx_sql = self.dialect.create_index_sql(idx, name)
+                steps.append(
+                    CreateIndexStep(
+                        description=f"Create index {idx.name} on {name}",
+                        sql=idx_sql,
+                        index=idx,
+                        table_name=name,
+                    )
+                )
 
         for name, table_diff in diff.modified_tables.items():
             if self.allow_drop_constraint:
