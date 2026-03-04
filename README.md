@@ -4,12 +4,13 @@
 
 Over time, databases can diverge from your SQLAlchemy models — columns get added manually, constraints go missing, a hotfix gets applied directly to the DB and never captured in code. This is *database drift*, and it's a real-world, compounding problem.
 
-SQLAlchemy's `create_all()` only creates new tables. Alembic works well for disciplined linear migrations, but it has no answer for drift: when your databases diverges from your migration history, you're on your own.
+SQLAlchemy's `create_all()` only creates new tables. Alembic works well for disciplined linear migrations, but it has no answer for drift: when your database diverges from your migration history, you're on your own.
 
 `dbconform` inspects your live database, compares it against your SQLAlchemy (or SQLModel) models, and either tells you exactly what's wrong — or *fixes* it.
 
 ```python
 from dbconform import DbConform
+from my_app.my_alchemy_schemas import Product, Cart # your own models
 
 conform = DbConform(credentials={"url": "sqlite:///./mydb.sqlite"})
 result = conform.apply_changes([Product, Cart])
