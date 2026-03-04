@@ -1,12 +1,61 @@
 # dbconform
 
-A Python library to conform database schema to models: keep your database schema in line with your SQLAlchemy or SQLModel definitions.
+**Your database schema has drifted. `dbconform` fixes it.**
 
-## Prerequisites
+Over time, databases diverge from your SQLAlchemy models — columns get added manually, constraints go missing, a hotfix gets applied directly to the DB and never captured in code. This is *database drift*, and it's a silent, compounding problem.
 
-- Python 3.11+
+SQLAlchemy's `create_all()` only creates *new* tables. Alembic works well for disciplined linear migrations, but it has no answer for drift: when your database has diverged from your migration history, you're on your own.
 
-## Installing from PyPI
+`dbconform` inspects your live database, compares it against your SQLAlchemy (or SQLModel) models, and either tells you exactly what's wrong — or fixes it.
+
+```python
+from dbconform import DbConform
+
+conform = DbConform(credentials={"url": "sqlite:///./mydb.sqlite"})
+result = conform.apply_changes([Product, Cart])
+
+print(f"Applied {len(result.steps)} change(s). Target database schema is conformant.")
+```
+
+That's it. No migration files. No history table. No CLI. No infrastructure.
+
+✅ &nbsp;&nbsp;Supports both sync/async Python\
+✅ &nbsp;&nbsp;SQLite\
+✅ &nbsp;&nbsp;PostgreSQL\
+🏗️ &nbsp;&nbsp;MariaDB (in-scope for future development)
+
+---
+
+## Why not Alembic?
+
+Alembic is excellent when you start clean and stay disciplined. But in the real world:
+
+| Capability | SQLAlchemy `create_all` | Alembic | Atlas | **dbconform** |
+|---|:---:|:---:|:---:|:---:|
+| Create new tables | ✅ | ✅ | ✅ | ✅ |
+| Alter existing columns | ❌ | ✅ | ✅ | ✅ |
+| Correct schema drift (stateless) | ❌ | ❌ | ⚠️ | ✅ |
+| Works without migration history | ✅ | ❌ | ❌ | ✅ |
+| Pure Python, `pip install` | ✅ | ✅ | ❌ | ✅ |
+| SQLite constraint rebuild | ❌ | ❌ | ❌ | ✅ |
+| Safe defaults (no accidental drops) | ✅ | ⚠️ | ⚠️ | ✅ |
+| In-process, programmatic | ✅ | ✅ | ❌ | ✅ |
+
+> **Atlas** is a powerful schema platform — excellent for CI/CD pipelines and cloud drift monitoring. It's a Go CLI tool with its own infrastructure. `dbconform` is a Python library you call from application code.
+
+---
+
+## When to use dbconform
+
+- You inherited a database and the migrations have gone sideways
+- You're running SQLite in development and Postgres in production — and they've diverged
+- You want to programmatically enforce schema conformance at application startup
+- You don't want to manage migration history at all
+- You ran a hotfix directly on the database and need to reconcile
+
+---
+
+## Installation
 
 ```bash
 pip install dbconform
@@ -14,43 +63,24 @@ pip install dbconform
 
 Optional extras:
 
-- **`[postgres]`** — PostgreSQL driver (psycopg) for connecting to PostgreSQL
-- **`[async]`** — Async drivers (aiosqlite, asyncpg) for `AsyncDbConform`
-
 ```bash
-pip install dbconform[postgres]       # PostgreSQL support
-pip install dbconform[async]          # Async (SQLite + PostgreSQL)
-pip install dbconform[async,postgres] # Both
+pip install dbconform[postgres]        # PostgreSQL support (psycopg)
+pip install dbconform[async]           # Async drivers (aiosqlite, asyncpg)
+pip install dbconform[async,postgres]  # Both
 ```
 
-## Usage
-
-Use dbconform as a library: define your models (SQLAlchemy or SQLModel), then compare them to the database. By default, only a plan is produced; apply only when you explicitly opt in.
-
-### Quick start
-
-**1. Create a `DbConform` instance** — pass either credentials (dbconform manages the connection) or your own connection:
-
-- **`credentials={"url": "sqlite:///./mydb.sqlite"}`** — dbconform opens the database, runs your call, then closes it.
-- **`connection=engine.connect()`** — you provide an open connection and close it when done.
-
-For PostgreSQL, also pass **`target_schema="public"`** (or your schema name). For SQLite you can omit it.
-
-**2. `compare(models)`** — dry run: returns a plan of steps (create table, add column, etc.) without executing anything. Use `result.sql()` to get the DDL script.
-
-**3. `apply_changes(models)`** — same as compare, but runs the plan against the database. All-or-nothing by default; rollback on failure.
+**Requirements:** Python 3.11+
 
 ---
 
-Define your models and pass them (one class or a list) to `compare()` or `apply_changes()`.
+## Quick Start
+
+### 1. Define your models (SQLAlchemy or SQLModel)
 
 ```python
 from sqlalchemy import Column, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import DeclarativeBase
 
-from dbconform import DbConform, ConformError
-
-# Define your models (SQLAlchemy or SQLModel)
 class Product(DeclarativeBase):
     __tablename__ = "product"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -62,23 +92,38 @@ class Cart(DeclarativeBase):
     id = Column(Integer, primary_key=True, autoincrement=True)
     product_id = Column(Integer, ForeignKey("product.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
+```
 
-# Compare: get a plan without applying
+### 2. Compare (dry run)
+
+```python
+from dbconform import DbConform, ConformError
+
 conform = DbConform(credentials={"url": "sqlite:///./mydb.sqlite"})
 result = conform.compare([Product, Cart])
 
 if isinstance(result, ConformError):
     print("Compare failed:", result.messages)
+elif not result.steps:
+    print("Database is up to date.")
 else:
-    if not result.steps:
-        print("Database is up to date.")
-    else:
-        for step in result.steps:
-            print(step)
-        print(result.sql())  # Full DDL script
+    for step in result.steps:
+        print(step)
+    print(result.sql())  # Full DDL script
 ```
 
-**Using your own connection** — you manage the connection lifecycle:
+### 3. Apply changes
+
+```python
+result = conform.apply_changes([Product, Cart])
+
+if isinstance(result, ConformError):
+    print("Apply failed:", result.messages)
+else:
+    print(f"Applied {len(result.steps)} change(s). Schema is conformant.")
+```
+
+### Using your own connection
 
 ```python
 from sqlalchemy import create_engine
@@ -90,102 +135,96 @@ with engine.connect() as conn:
 engine.dispose()
 ```
 
-**Async usage** — use `AsyncDbConform` with async driver URLs (`sqlite+aiosqlite://`, `postgresql+asyncpg://`). Install the `[async]` extra: `pip install dbconform[async]`.
+### PostgreSQL
+
+```python
+conform = DbConform(
+    credentials={"url": "postgresql+psycopg://user:pass@host/db"},
+    target_schema="public"
+)
+result = conform.apply_changes([Product, Cart])
+```
+
+### Async
 
 ```python
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
-
 from dbconform import AsyncDbConform, ConformError
 
 async def main():
     engine = create_async_engine("sqlite+aiosqlite:///./mydb.sqlite")
     async with engine.connect() as conn:
         conform = AsyncDbConform(async_connection=conn)
-        result = await conform.compare([Product, Cart])  # same models as above
+        result = await conform.apply_changes([Product, Cart])
     await engine.dispose()
-    if isinstance(result, ConformError):
-        print("Compare failed:", result.messages)
-    else:
-        print(f"Plan has {len(result.steps)} step(s)")
 
 asyncio.run(main())
 ```
 
-### Example outputs
+---
 
-- **Empty database:** `compare()` might show steps like `Create table product`, `Create table cart`.
-- **Schema matches:** `result.steps` is empty; your database is up to date.
-- **Missing column:** If `cart` exists but lacks `quantity`, you might see `Add column quantity to cart`.
+## Safe by Default
 
-Use `result.sql()` to get the full DDL script as a single string.
+`dbconform` will not drop tables or columns unless you explicitly opt in. The defaults are designed to be safe in production.
 
-### Applying changes
+| Flag | Default | What it controls |
+|---|:---:|---|
+| `allow_drop_extra_tables` | `False` | DROP TABLE for tables not in your models |
+| `allow_drop_extra_columns` | `False` | DROP COLUMN for columns not in your models |
+| `allow_drop_extra_constraints` | `True` | DROP CONSTRAINT / DROP INDEX for removed constraints |
+| `allow_shrink_column` | `False` | ALTER COLUMN that reduces size (may truncate data) |
+| `allow_sqlite_table_rebuild` | `True` | SQLite table rebuild for CHECK/UNIQUE/FK changes |
+| `report_extra_tables` | `True` | Populate `plan.extra_tables` with unrecognized tables |
 
-To compare and apply in one call, use `apply_changes()`. Same comparison as `compare()`, but it executes the DDL. (For async, use `await conform.apply_changes(...)`.)
+`apply_changes()` additional flags:
+
+| Flag | Default | What it controls |
+|---|:---:|---|
+| `commit_per_step` | `False` | Commit after each step (partial progress on failure) |
+| `emit_log` | `True` | JSON-line logs for applied steps to stdout |
+| `log_file` | `None` | Path to append logs to a file |
+
+All flags are passed as keyword arguments:
 
 ```python
-result = conform.apply_changes([Product, Cart])
-
-if isinstance(result, ConformError):
-    print("Apply failed:", result.messages)
-else:
-    print(f"Applied {len(result.steps)} step(s). Schema is conformant.")
+result = conform.apply_changes(
+    [Product, Cart],
+    allow_drop_extra_columns=True,
+    allow_shrink_column=True
+)
 ```
 
-### Options and flags
+---
 
-Both `compare()` and `apply_changes()` accept these flags (e.g. `conform.compare(models, allow_drop_extra_tables=True)`):
+## SQLite and PostgreSQL
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `allow_drop_extra_tables` | `False` | Include DROP TABLE steps for tables in the DB but not in your models. |
-| `allow_drop_extra_columns` | `False` | Include DROP COLUMN steps for columns in the DB but not in your models. |
-| `allow_drop_extra_constraints` | `True` | Include DROP CONSTRAINT / DROP INDEX steps for constraints removed from your models. |
-| `allow_shrink_column` | `False` | Include ALTER COLUMN steps that reduce column size (e.g. VARCHAR 500→255). May truncate data; opt-in only. |
-| `allow_sqlite_table_rebuild` | `True` | For SQLite: when adding CHECK/UNIQUE/FK to existing tables, rebuild the table. Set `False` to skip; drift remains and is logged. |
-| `report_extra_tables` | `True` | Populate `plan.extra_tables` with tables in the DB but not in your models. |
+SQLite imposes strict limits on `ALTER TABLE`. Adding constraints (CHECK, UNIQUE, foreign keys) to an existing table requires rebuilding it entirely. `dbconform` handles this automatically — including data preservation, index recreation, and foreign key integrity — so you don't have to think about it.
 
-`apply_changes()` additionally accepts:
+PostgreSQL uses a different DDL dialect. `dbconform` abstracts both behind the same API.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `commit_per_step` | `False` | Commit after each step (partial progress if a later step fails). |
-| `emit_log` | `True` | Emit JSON-line logs for applied steps to stdout. |
-| `log_file` | `None` | Optional path to append the same logs to a file. |
+---
 
-**SQLite vs PostgreSQL:** SQLite has limited ALTER TABLE support; dbconform uses table rebuilds for CHECK/UNIQUE/FK. See [docs/technical/04-sqlite-vs-postgres-differences.md](docs/technical/04-sqlite-vs-postgres-differences.md) for differences, workarounds, and flags.
+## Contributing
 
-
-## For dbconform Developers
-
-
-### Local Installation
-Create a virtual environment and install the package in editable mode:
+Issues and pull requests are welcome. For local development:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate   # Linux/macOS
-# .venv\Scripts\activate   # Windows
-pip install -e ".[dev, async, postgres]"
+source .venv/bin/activate
+pip install -e ".[dev,async,postgres]"
 ```
 
-### Running tests
-
-From the project root:
+Running tests (Docker or Podman required for PostgreSQL tests):
 
 ```bash
 dbconform test run
 ```
 
-With the `[postgres]` extra and Docker or Podman, this starts a Postgres container, runs the full suite (SQLite + PostgreSQL), then stops it. Without Postgres, only SQLite tests run.
+See `tests/TESTS_README.md` for the full test organization.
 
-Other commands: `dbconform test check-container` (verify Docker/Podman), `dbconform test postgres up` / `dbconform test postgres down` (manual container lifecycle). See `tests/TESTS_README.md` for test organization.
+---
 
-### Installing in other projects
+## License
 
-To use dbconform in another Python application:
-
-- **Development (same machine):** From your other project, run `pip install -e /path/to/dbconform` or `uv pip install -e /path/to/dbconform`. Changes in the dbconform repo are reflected immediately.
-- **Built wheel:** From the dbconform repo run `uv build` (requires `uv` and dev deps: `pip install -e ".[dev]"`). This produces a wheel in `dist/` (e.g. `dist/dbconform-0.1.0-py3-none-any.whl`). In your other project: `pip install /path/to/dbconform/dist/dbconform-0.1.0-py3-none-any.whl`.
-- **Private index:** Upload the contents of `dist/` to your index; then `pip install dbconform --index-url https://your-index/simple/`.
+MIT
