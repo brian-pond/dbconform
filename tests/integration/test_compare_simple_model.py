@@ -262,6 +262,67 @@ def test_apply_changes_execution_lanes_rebuild_check_constraints_use_new_table_c
     assert len(recompare.steps) == 0
 
 
+def test_apply_changes_sqlite_rebuild_with_index_succeeds(
+    empty_sqlite_db: tuple[Path, str],
+) -> None:
+    """SQLite rebuild: table with index + CHECK; index names are global, must create after DROP.
+
+    Bug: CREATE INDEX on _dbconform_new conflicts with old table's index. Fix: create indexes
+    after DROP TABLE and RENAME (index names freed).
+    """
+    from sqlalchemy import CheckConstraint, Column, Index, Integer, String
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.sql import column
+
+    class Base(DeclarativeBase):
+        pass
+
+    class NotificationSubscriptions(Base):
+        __tablename__ = "notification_subscriptions"
+        id = Column(Integer, primary_key=True)
+        level = Column(String(50), nullable=False)
+        task = Column(String(100), nullable=False)
+        __table_args__ = (
+            Index("ix_notification_subscriptions_level_task", "level", "task"),
+            CheckConstraint(
+                column("level").in_(["info", "warning", "error"]),
+                name="ck_level",
+            ),
+        )
+
+    _path, url = empty_sqlite_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE notification_subscriptions ("
+                "id INTEGER PRIMARY KEY, level VARCHAR(50) NOT NULL, task VARCHAR(100) NOT NULL)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX ix_notification_subscriptions_level_task "
+                "ON notification_subscriptions (level, task)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO notification_subscriptions (id, level, task) "
+                "VALUES (1, 'info', 'sync')"
+            )
+        )
+        conn.commit()
+    engine.dispose()
+
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    result = conform.apply_changes(NotificationSubscriptions)
+    assert not isinstance(result, dbconform.ConformError), str(result)
+    assert any(isinstance(s, dbconform.RebuildTableStep) for s in result.steps)
+    recompare = conform.compare(NotificationSubscriptions)
+    assert not isinstance(recompare, dbconform.ConformError)
+    assert len(recompare.steps) == 0
+
+
 def test_compare_invalid_model_returns_conform_error(empty_db: tuple[str, str | None]) -> None:
     """Passing a class with no __table__ returns ConformError (01-functional: Error handling)."""
     url, target_schema = empty_db

@@ -45,8 +45,9 @@ def build_rebuild_statements(
     """
     Produce SQL statements to rebuild a table with the target schema.
 
-    Order: PRAGMA foreign_keys=OFF, CREATE _new, CREATE indexes on _new,
-    INSERT INTO _new SELECT..., DROP old, RENAME _new TO old, PRAGMA foreign_keys=ON.
+    Order: PRAGMA foreign_keys=OFF, CREATE _new, INSERT..., DROP old,
+    RENAME _new TO old, CREATE indexes on old (SQLite index names are global),
+    PRAGMA foreign_keys=ON.
 
     Args:
         dialect: Must be SQLiteDialect (or compatible).
@@ -82,11 +83,6 @@ def build_rebuild_statements(
     create_sql = sqlite_dialect.create_table_sql(new_table_def)
     statements.append(create_sql)
 
-    # Create indexes on new table
-    for idx in target_table.indexes:
-        idx_sql = sqlite_dialect.create_index_sql(idx, qualified_new)
-        statements.append(idx_sql)
-
     # Copy data: map columns from old to new; new columns get default or NULL
     old_cols = {c.name: c for c in old_table.columns}
     insert_cols: list[str] = []
@@ -116,6 +112,11 @@ def build_rebuild_statements(
 
     # Rename new to original name
     statements.append(f"ALTER TABLE {tbl_new} RENAME TO {quote(base_name)}")
+
+    # Create indexes on renamed table (after DROP so index names are freed; SQLite names are global)
+    for idx in target_table.indexes:
+        idx_sql = sqlite_dialect.create_index_sql(idx, table_name)
+        statements.append(idx_sql)
 
     # Restore FK checks
     statements.append("PRAGMA foreign_keys=ON")

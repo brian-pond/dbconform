@@ -154,6 +154,8 @@ Both `compare()` and `apply_changes()` accept these flags (e.g. `conform.compare
 | `emit_log` | `True` | Emit JSON-line logs for applied steps to stdout. |
 | `log_file` | `None` | Optional path to append the same logs to a file. |
 
+**SQLite vs PostgreSQL:** SQLite has limited ALTER TABLE support; dbconform uses table rebuilds for CHECK/UNIQUE/FK. See [docs/technical/04-sqlite-vs-postgres-differences.md](docs/technical/04-sqlite-vs-postgres-differences.md) for differences, workarounds, and flags.
+
 
 ## For dbconform Developers
 

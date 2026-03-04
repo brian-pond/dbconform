@@ -1,0 +1,21 @@
+---
+description: When modifying SQLite-specific behavior, keep the dialect differences document current
+alwaysApply: false
+---
+
+# SQLite Dialect Changes
+
+When you add, change, or remove SQLite-specific behavior (including workarounds, rebuild logic, dialect differences, or config flags tied to SQLite), **update** [docs/technical/04-sqlite-vs-postgres-differences.md](docs/technical/04-sqlite-vs-postgres-differences.md).
+
+## When to update
+
+- Modifying `src/dbconform/sql_dialect/sqlite*.py`, `sqlite_rebuild.py`
+- Changing `allow_sqlite_table_rebuild`, `allow_shrink_column`, or other SQLite-related flags
+- Adding or changing SQLite workarounds (e.g. index naming, CHECK rewriting, default translation)
+- Discovering new SQLite vs PostgreSQL behavioral differences
+
+## How to update
+
+- Add or revise the relevant section in the document
+- Keep the "Impact on dbconform" and "Mitigation" subsections accurate
+- If you add a new difference, document it so future contributors can find it

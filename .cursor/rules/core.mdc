@@ -14,6 +14,8 @@ alwaysApply: true
 
 - **CLI conventions**: When adding or changing CLI commands, follow [.cursor/rules/cli-conventions.mdc](.cursor/rules/cli-conventions.mdc) so subcommand groups show help instead of "Missing command".
 
+- **SQLite dialect**: When modifying SQLite-specific behavior (rebuild, dialect, indexes, defaults, etc.), follow [.cursor/rules/sqlite-dialect.mdc](.cursor/rules/sqlite-dialect.mdc) to keep the technical doc current.
+
 ## Documentation-First Principle
 Before writing ANY code, the AI must:
 1. Read relevant documentation from the `docs/requirements` folder using @docs
