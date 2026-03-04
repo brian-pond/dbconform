@@ -203,6 +203,65 @@ def test_apply_changes_check_constraint_in_clause_no_postcompile(
     assert "'sequential'" in sql and "'parallel'" in sql
 
 
+def test_apply_changes_execution_lanes_rebuild_check_constraints_use_new_table_columns(
+    empty_sqlite_db: tuple[Path, str],
+) -> None:
+    """SQLite rebuild: CHECK constraints in _dbconform_new must reference new table columns, not old.
+
+    Bug: execution_lanes.concurrency_mode in CHECK fails when creating execution_lanes_dbconform_new.
+    Fix: rewrite to unqualified concurrency_mode (refers to table being created).
+    """
+    from sqlalchemy import CheckConstraint, Column, Integer, String
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.sql import column
+
+    class Base(DeclarativeBase):
+        pass
+
+    class ExecutionLanes(Base):
+        __tablename__ = "execution_lanes"
+        id = Column(Integer, primary_key=True)
+        concurrency_mode = Column(String(50), nullable=False)
+        priority = Column(String(50), nullable=False)
+        __table_args__ = (
+            CheckConstraint(
+                column("concurrency_mode").in_(["sequential", "parallel"]),
+                name="concurrencymode",
+            ),
+            CheckConstraint(
+                column("priority").in_(["high", "low", "normal"]),
+                name="lanepriority",
+            ),
+        )
+
+    _path, url = empty_sqlite_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE execution_lanes ("
+                "id INTEGER PRIMARY KEY, concurrency_mode VARCHAR(50) NOT NULL, "
+                "priority VARCHAR(50) NOT NULL)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO execution_lanes (id, concurrency_mode, priority) "
+                "VALUES (1, 'sequential', 'high')"
+            )
+        )
+        conn.commit()
+    engine.dispose()
+
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=None)
+    result = conform.apply_changes(ExecutionLanes)
+    assert not isinstance(result, dbconform.ConformError), str(result)
+    assert any(isinstance(s, dbconform.RebuildTableStep) for s in result.steps)
+    recompare = conform.compare(ExecutionLanes)
+    assert not isinstance(recompare, dbconform.ConformError)
+    assert len(recompare.steps) == 0
+
+
 def test_compare_invalid_model_returns_conform_error(empty_db: tuple[str, str | None]) -> None:
     """Passing a class with no __table__ returns ConformError (01-functional: Error handling)."""
     url, target_schema = empty_db

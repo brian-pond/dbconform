@@ -70,6 +70,30 @@ def _step_target_for_error(step: ConformStep, index: int) -> tuple[str, str]:
     return ("step", f"step_{index}")
 
 
+def _emit_extra_tables_log(
+    extra_tables: list,
+    *,
+    emit_log: bool = True,
+    log_file: str | None = None,
+) -> None:
+    """
+    Emit structured log for extra tables (02-non-functional: Observability).
+
+    When tables exist in DB but not in model, surface them so the user sees drift remains.
+    """
+    if not extra_tables:
+        return
+    tables_data = [{"name": t.name, "schema": t.schema} for t in extra_tables]
+    record = {"event": "extra_tables", "tables": tables_data}
+    line = json.dumps(record) + "\n"
+    if emit_log:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    if log_file:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(line)
+
+
 def _emit_skipped_log(
     skipped: list[SkippedStep],
     *,
@@ -161,6 +185,13 @@ def _apply_plan(
             log_file=log_file,
         )
 
+    if plan.extra_tables:
+        _emit_extra_tables_log(
+            plan.extra_tables,
+            emit_log=emit_log,
+            log_file=log_file,
+        )
+
     executable_steps = [s for s in plan.steps if isinstance(s, RebuildTableStep) or (s.sql and s.sql.strip())]
     if not executable_steps:
         return None
@@ -232,12 +263,19 @@ async def _apply_plan_async(
     """
     Execute all DDL and data-operation steps in the plan (async).
 
-    Same semantics as _apply_plan. Emits skipped_steps, then runs each step
+    Same semantics as _apply_plan. Emits skipped_steps, extra_tables, then runs each step
     (including RebuildTableStep for SQLite).
     """
     if plan.skipped_steps:
         _emit_skipped_log(
             plan.skipped_steps,
+            emit_log=emit_log,
+            log_file=log_file,
+        )
+
+    if plan.extra_tables:
+        _emit_extra_tables_log(
+            plan.extra_tables,
             emit_log=emit_log,
             log_file=log_file,
         )

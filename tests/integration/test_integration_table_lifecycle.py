@@ -5,6 +5,9 @@ Traceability: docs/requirements/01-functional.md — Schema parity, add/alter on
 Pattern: create table(s), compare, assert plan, apply_changes or no-op, recompare, assert.
 """
 
+import json
+
+import pytest
 from sqlalchemy import create_engine, text
 
 import dbconform
@@ -66,6 +69,38 @@ def test_extra_table_reported_no_drop_recompare_still_extra(
     recompare = conform.compare(SimpleTable)
     assert len(recompare.extra_tables) == 1
     assert recompare.extra_tables[0].name == "other_table"
+
+
+def test_extra_table_only_apply_changes_emits_extra_tables_log(
+    empty_db: tuple[str, str | None],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When only extra tables exist (0 DDL steps), apply_changes emits extra_tables to logs.
+
+    Gap: without this, user sees no output and may not realize drift (extra tables) remains.
+    """
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    conform.apply_changes(SimpleTable)
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE orphan_extra (id INTEGER PRIMARY KEY)"))
+        conn.commit()
+    engine.dispose()
+
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    result = conform.apply_changes(SimpleTable)
+    assert not isinstance(result, dbconform.ConformError)
+    assert len(result.steps) == 0
+    assert len(result.extra_tables) == 1
+    assert result.extra_tables[0].name == "orphan_extra"
+
+    out, _ = capsys.readouterr()
+    records = [json.loads(ln) for ln in out.strip().split("\n") if ln.strip()]
+    extra_events = [r for r in records if r.get("event") == "extra_tables"]
+    assert len(extra_events) >= 1
+    assert "tables" in extra_events[0]
+    assert any(t.get("name") == "orphan_extra" for t in extra_events[0]["tables"])
 
 
 def test_extra_table_dropped_when_allow_drop_extra_tables(

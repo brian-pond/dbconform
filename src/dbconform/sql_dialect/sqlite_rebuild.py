@@ -10,9 +10,30 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from dbconform.internal.objects import QualifiedName, TableDef
+from dbconform.internal.objects import CheckDef, QualifiedName, TableDef
 from dbconform.sql_dialect.base import Dialect
 from dbconform.sql_dialect.sqlite import SQLiteDialect
+
+
+def _rewrite_check_expressions_for_new_table(
+    check_constraints: tuple[CheckDef, ...],
+    original_table_name: str,
+) -> tuple[CheckDef, ...]:
+    """
+    Rewrite CHECK expressions so column references use unqualified names.
+
+    Model-derived CHECKs often reference table.col (e.g. execution_lanes.concurrency_mode).
+    When creating _dbconform_new, those refs are invalid; unqualified col names
+    refer to the table being created. Strip the table qualifier.
+    """
+    rewritten: list[CheckDef] = []
+    for ck in check_constraints:
+        expr = ck.expression
+        expr = expr.replace(f'"{original_table_name}".', "").replace(
+            f"{original_table_name}.", ""
+        )
+        rewritten.append(CheckDef(name=ck.name, expression=expr))
+    return tuple(rewritten)
 
 
 def build_rebuild_statements(
@@ -43,7 +64,14 @@ def build_rebuild_statements(
     base_name = table_name.name
     new_name = f"{base_name}_dbconform_new"
     qualified_new = QualifiedName(schema=table_name.schema, name=new_name)
-    new_table_def = replace(target_table, name=qualified_new)
+    rewritten_checks = _rewrite_check_expressions_for_new_table(
+        target_table.check_constraints, base_name
+    )
+    new_table_def = replace(
+        target_table,
+        name=qualified_new,
+        check_constraints=rewritten_checks,
+    )
 
     statements: list[str] = []
 
