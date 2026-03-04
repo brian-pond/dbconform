@@ -32,11 +32,12 @@
 - **API**: No execution unless the caller uses apply. The library exposes **compare(models)** (dry-run: returns a plan only) and **apply_changes(models)** (compare then apply the plan in one transaction). So dry-run is the default when using compare(); apply happens only when the caller invokes apply_changes(). The library returns a plan (DDL and data-operation steps) for inspection or for the caller to execute elsewhere. Output-only mode is available by using compare() and emitting plan SQL (e.g. plan.sql()) to stdout or file.
 - **CLI** (when a conform CLI is provided): Same semantics—dry-run by default; user prompted to confirm (e.g. "Apply these changes? [y/N]") before execution.
 - **Destructive changes**: By default only add/alter; drops and other destructive changes require explicit opt-in from the caller (or user, when using CLI).
-- **Opt-in flags**: The API exposes four boolean flags on `compare()` and `apply_changes()`:
-  - **allow_drop_table**: when True, the plan may include DROP TABLE steps for tables present in the DB but not in the model. Default false.
-  - **allow_drop_column**: when True, the plan may include DROP COLUMN steps for columns present in the DB but not in the model. Default false.
-  - **allow_drop_constraint**: when True (default), the plan may include DROP CONSTRAINT / DROP INDEX steps for unique, foreign key, check, or index objects removed from the model. Default True (no data loss, easily reversible).
+- **Opt-in flags**: The API exposes five boolean flags on `compare()` and `apply_changes()`:
+  - **allow_drop_extra_tables**: when True, the plan may include DROP TABLE steps for tables present in the DB but not in the model. Default false.
+  - **allow_drop_extra_columns**: when True, the plan may include DROP COLUMN steps for columns present in the DB but not in the model. Default false.
+  - **allow_drop_extra_constraints**: when True (default), the plan may include DROP CONSTRAINT / DROP INDEX steps for unique, foreign key, check, or index objects removed from the model. Default True (no data loss, easily reversible).
   - **allow_shrink_column**: when True, the plan may include ALTER COLUMN steps that shrink a column (e.g. reduce VARCHAR length); when False (default), such changes are omitted to avoid data-loss risk unless the caller opts in.
+  - **allow_sqlite_table_rebuild**: when True (default), SQLite tables missing CHECK, UNIQUE, or FOREIGN KEY constraints are rebuilt (create new table with constraints, copy data, drop old, rename) to achieve parity. When False, such constraint adds are skipped and recorded in `plan.skipped_steps`; drift remains and is logged clearly.
 
 ### Transaction behavior
 - Transaction behavior is **configurable**. **Default:** all-or-nothing—if any step fails during apply, the entire conform is rolled back. **Option:** `commit_per_step=True` on `apply_changes()` commits after each step so that prior steps persist if a later step fails.
@@ -54,6 +55,8 @@ Elements that dbconform compares and corrects (add/alter as per default behavior
 - **Columns** (add missing; alter type, nullability, defaults).
 - **Primary keys**, **unique constraints**, **foreign keys**, **indexes**, **check constraints**.
 - **Table and column comments** (where supported by the backend).
+
+**SQLite constraint rebuild:** SQLite does not support `ALTER TABLE ADD CONSTRAINT` for CHECK, UNIQUE, or FOREIGN KEY. By default (`allow_sqlite_table_rebuild=True`), dbconform rebuilds the table (create new with constraints, copy data, drop old, rename) to achieve full parity. Set `allow_sqlite_table_rebuild=False` to skip rebuilds; skipped steps are recorded in `plan.skipped_steps` and emitted as structured logs (`event: skipped_step`) so the user sees that drift remains.
 
 **Identifiers and quoting:** Table and column names follow the **target database’s quoting rules** (e.g. PostgreSQL double quotes, MariaDB backticks). dbconform does not impose a separate quoting scheme.
 

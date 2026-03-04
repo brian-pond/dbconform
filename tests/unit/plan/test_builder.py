@@ -3,14 +3,14 @@ Unit tests for ConformPlanBuilder.
 
 Traceability: docs/requirements/01-functional.md (Plan and DDL order,
 Destructive changes, Opt-in flags). Extra tables from removed_tables;
-no DROP by default; allow_drop_table/allow_drop_column/allow_shrink_column
+no DROP by default; allow_drop_extra_tables/allow_drop_extra_columns/allow_shrink_column
 control destructive steps.
 """
 
 from collections import OrderedDict
 
 from dbconform.plan.builder import ConformPlanBuilder
-from dbconform.plan.steps import ConformPlan, DropTableStep
+from dbconform.plan.steps import ConformPlan, DropTableStep, RebuildTableStep, SkippedStep
 from dbconform.schema.diff import DiffResult, TableDiff
 from dbconform.schema.objects import ColumnDef, IndexDef, QualifiedName, TableDef
 from dbconform.sql_dialect.sqlite import SQLiteDialect
@@ -47,7 +47,7 @@ def test_builder_added_table_produces_create_step() -> None:
 
 
 def test_builder_removed_table_in_extra_no_drop() -> None:
-    """Removed table (DB-only) -> extra_tables, no DROP step when allow_drop_table=False."""
+    """Removed table (DB-only) -> extra_tables, no DROP step when allow_drop_extra_tables=False."""
     diff = DiffResult(
         added_tables=OrderedDict(),
         removed_tables=OrderedDict(
@@ -69,8 +69,8 @@ def test_builder_removed_table_in_extra_no_drop() -> None:
     assert plan.extra_tables[0].name == "orphan"
 
 
-def test_builder_removed_table_drop_when_allow_drop_table() -> None:
-    """Removed table (DB-only) -> DROP TABLE when allow_drop_table=True
+def test_builder_removed_table_drop_when_allow_drop_extra_tables() -> None:
+    """Removed table (DB-only) -> DROP TABLE when allow_drop_extra_tables=True
     (01-functional: Opt-in flags)."""
     diff = DiffResult(
         added_tables=OrderedDict(),
@@ -87,7 +87,7 @@ def test_builder_removed_table_drop_when_allow_drop_table() -> None:
         ),
         modified_tables=OrderedDict(),
     )
-    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_table=True).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_extra_tables=True).build(diff)
     assert len(plan.steps) == 1
     assert isinstance(plan.steps[0], DropTableStep)
     assert plan.steps[0].table_name.name == "orphan"
@@ -95,8 +95,8 @@ def test_builder_removed_table_drop_when_allow_drop_table() -> None:
     assert "orphan" in (plan.steps[0].sql or "")
 
 
-def test_builder_removed_column_drop_when_allow_drop_column() -> None:
-    """Modified table with removed column -> DROP COLUMN step when allow_drop_column=True."""
+def test_builder_removed_column_drop_when_allow_drop_extra_columns() -> None:
+    """Modified table with removed column -> DROP COLUMN step when allow_drop_extra_columns=True."""
     qualified = QualifiedName(None, "t")
     old_table = TableDef(
         name=qualified,
@@ -125,7 +125,7 @@ def test_builder_removed_column_drop_when_allow_drop_column() -> None:
             ]
         ),
     )
-    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_column=True).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_extra_columns=True).build(diff)
     assert len(plan.steps) == 1
     assert "DROP COLUMN" in (plan.steps[0].sql or "")
     assert "extra" in (plan.steps[0].sql or "")
@@ -221,8 +221,8 @@ def test_builder_report_extra_tables_false() -> None:
     assert len(plan.extra_tables) == 0
 
 
-def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
-    """Modified table with removed index -> DROP INDEX when allow_drop_constraint=True (default)
+def test_builder_removed_index_drop_when_allow_drop_extra_constraints_true() -> None:
+    """Modified table with removed index -> DROP INDEX when allow_drop_extra_constraints=True (default)
     (01-functional: add/remove constraints)."""
     from dbconform.schema.diff import TableDiff
 
@@ -253,14 +253,14 @@ def test_builder_removed_index_drop_when_allow_drop_constraint_true() -> None:
             ]
         ),
     )
-    plan = ConformPlanBuilder(SQLiteDialect()).build(diff)  # default allow_drop_constraint=True
+    plan = ConformPlanBuilder(SQLiteDialect()).build(diff)  # default allow_drop_extra_constraints=True
     assert len(plan.steps) == 1
     assert "DROP INDEX" in (plan.steps[0].sql or "")
     assert "idx_t_id" in (plan.steps[0].sql or "")
 
 
-def test_builder_removed_index_no_drop_when_allow_drop_constraint_false() -> None:
-    """Modified table with removed index -> no DROP step when allow_drop_constraint=False."""
+def test_builder_removed_index_no_drop_when_allow_drop_extra_constraints_false() -> None:
+    """Modified table with removed index -> no DROP step when allow_drop_extra_constraints=False."""
     from dbconform.schema.diff import TableDiff
 
     qualified = QualifiedName(None, "t")
@@ -290,8 +290,86 @@ def test_builder_removed_index_no_drop_when_allow_drop_constraint_false() -> Non
             ]
         ),
     )
-    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_constraint=False).build(diff)
+    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_extra_constraints=False).build(diff)
     assert len(plan.steps) == 0
+
+
+def test_builder_sqlite_added_check_emits_rebuild_step() -> None:
+    """SQLite: added CHECK constraint -> RebuildTableStep when allow_sqlite_table_rebuild=True."""
+    from dbconform.schema.diff import TableDiff
+    from dbconform.schema.objects import CheckDef
+
+    qualified = QualifiedName(None, "t")
+    old_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False), ColumnDef("x", "INTEGER", nullable=True)),
+    )
+    new_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False), ColumnDef("x", "INTEGER", nullable=True)),
+        check_constraints=(CheckDef(name="ck_x", expression="x >= 0"),),
+    )
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict(),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        added_checks=(CheckDef(name="ck_x", expression="x >= 0"),),
+                    ),
+                ),
+            ]
+        ),
+    )
+    plan = ConformPlanBuilder(SQLiteDialect()).build(diff)
+    assert len(plan.steps) == 1
+    assert isinstance(plan.steps[0], RebuildTableStep)
+    assert plan.steps[0].table_name.name == "t"
+    assert len(plan.skipped_steps) == 0
+
+
+def test_builder_sqlite_added_check_skip_when_rebuild_disabled() -> None:
+    """SQLite: added CHECK -> skipped_steps when allow_sqlite_table_rebuild=False."""
+    from dbconform.schema.diff import TableDiff
+    from dbconform.schema.objects import CheckDef
+
+    qualified = QualifiedName(None, "t")
+    old_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+    )
+    new_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+        check_constraints=(CheckDef(name="ck_id", expression="id > 0"),),
+    )
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict(),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        added_checks=(CheckDef(name="ck_id", expression="id > 0"),),
+                    ),
+                ),
+            ]
+        ),
+    )
+    plan = ConformPlanBuilder(
+        SQLiteDialect(), allow_sqlite_table_rebuild=False
+    ).build(diff)
+    assert len(plan.steps) == 0
+    assert len(plan.skipped_steps) == 1
+    assert isinstance(plan.skipped_steps[0], SkippedStep)
+    assert "check" in plan.skipped_steps[0].description.lower()
 
 
 def test_builder_fk_order_parent_before_child() -> None:

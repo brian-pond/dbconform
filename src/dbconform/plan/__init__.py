@@ -13,6 +13,8 @@ from dbconform.plan.steps import (
     CreateIndexStep,
     CreateTableStep,
     DropTableStep,
+    RebuildTableStep,
+    SkippedStep,
 )
 
 __all__ = [
@@ -20,6 +22,8 @@ __all__ = [
     "CreateIndexStep",
     "CreateTableStep",
     "DropTableStep",
+    "RebuildTableStep",
+    "SkippedStep",
     "ConformPlan",
     "ConformPlanBuilder",
     "ConformStep",

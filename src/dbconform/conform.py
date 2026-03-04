@@ -27,7 +27,10 @@ from dbconform.plan.steps import (
     CreateIndexStep,
     CreateTableStep,
     DropTableStep,
+    RebuildTableStep,
+    SkippedStep,
 )
+from dbconform.sql_dialect.sqlite_rebuild import build_rebuild_statements
 from dbconform.sql_dialect import Dialect, PostgreSQLDialect, SQLiteDialect
 
 
@@ -57,7 +60,7 @@ def _emit_apply_log(
 def _step_target_for_error(step: ConformStep, index: int) -> tuple[str, str]:
     """Return (object_type, identifier) for a step (01-functional: Error handling)."""
     match step:
-        case DropTableStep():
+        case DropTableStep() | RebuildTableStep():
             return ("table", str(step.table_name))
         case CreateTableStep() | AlterTableStep() | CreateIndexStep():
             if hasattr(step, "table_name") and step.table_name:
@@ -65,6 +68,34 @@ def _step_target_for_error(step: ConformStep, index: int) -> tuple[str, str]:
             if getattr(step, "table", None):
                 return ("table", str(step.table.name))
     return ("step", f"step_{index}")
+
+
+def _emit_skipped_log(
+    skipped: list[SkippedStep],
+    *,
+    emit_log: bool = True,
+    log_file: str | None = None,
+) -> None:
+    """
+    Emit structured log lines for skipped steps (02-non-functional: Observability).
+
+    When drift remains because a step could not be applied (e.g. SQLite constraint add
+    with allow_sqlite_table_rebuild=False), these are logged so the user knows.
+    """
+    for s in skipped:
+        record = {
+            "event": "skipped_step",
+            "description": s.description,
+            "reason": s.reason,
+            "table": str(s.table_name) if s.table_name else None,
+        }
+        line = json.dumps(record) + "\n"
+        if emit_log:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        if log_file:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(line)
 
 
 def _ensure_sqlite_memory_shared(url: str) -> str:
@@ -114,46 +145,59 @@ def _apply_plan(
     log_file: str | None = None,
 ) -> ConformError | None:
     """
-    Execute all DDL and data-operation statements in the plan.
+    Execute all DDL and data-operation steps in the plan.
 
+    Emits skipped_steps to logs first (drift remains for those). Then runs each step:
+    RebuildTableStep uses dialect-specific rebuild logic; others execute step.sql.
     When the connection is already in a transaction, uses a savepoint. Otherwise
     uses connection.begin(). When commit_per_step is False (default), runs in one
     transaction/savepoint; on failure it is rolled back (01-functional).
-    When commit_per_step is True, commits after each step.
     On any failure returns ConformError with target_objects set to the step that failed.
     """
-    statements = plan.statements()
-    if not statements:
-        return None
-    steps_with_sql = [s for s in plan.steps if s.sql and s.sql.strip()]
+    if plan.skipped_steps:
+        _emit_skipped_log(
+            plan.skipped_steps,
+            emit_log=emit_log,
+            log_file=log_file,
+        )
 
-    def run_step(i: int, sql: str) -> ConformError | None:
+    executable_steps = [s for s in plan.steps if isinstance(s, RebuildTableStep) or (s.sql and s.sql.strip())]
+    if not executable_steps:
+        return None
+
+    dialect = _dialect_for_engine(connection.engine)
+
+    def run_step(i: int, step: ConformStep) -> ConformError | None:
         try:
-            for part in (p.strip() for p in sql.split(";") if p.strip()):
-                connection.execute(text(part))
-            step = steps_with_sql[i] if i < len(steps_with_sql) else None
-            desc = step.description if step else f"step_{i}"
-            _emit_apply_log(i, desc, emit_log=emit_log, log_file=log_file)
+            if isinstance(step, RebuildTableStep):
+                stmts = build_rebuild_statements(
+                    dialect, step.table_name, step.target_table, step.old_table
+                )
+                for stmt in stmts:
+                    connection.execute(text(stmt))
+            else:
+                assert step.sql
+                for part in (p.strip() for p in step.sql.split(";") if p.strip()):
+                    connection.execute(text(part))
+            _emit_apply_log(i, step.description, emit_log=emit_log, log_file=log_file)
             if commit_per_step:
                 connection.commit()
             return None
         except Exception as e:
-            step = steps_with_sql[i] if i < len(steps_with_sql) else None
-            desc = step.description if step else f"step_{i}"
-            e.add_note(f"Step {i}: {desc}")
-            target = _step_target_for_error(step, i) if step else ("step", f"step_{i}")
+            e.add_note(f"Step {i}: {step.description}")
+            target = _step_target_for_error(step, i)
             return ConformError(target_objects=[target], messages=[str(e)])
 
     if commit_per_step:
-        for i, sql in enumerate(statements):
-            err = run_step(i, sql)
+        for i, step in enumerate(executable_steps):
+            err = run_step(i, step)
             if err is not None:
                 return err
         return None
-    # Use savepoint when already in transaction (e.g. engine.begin()); else begin()
+
     def run_all() -> ConformError | None:
-        for i, sql in enumerate(statements):
-            err = run_step(i, sql)
+        for i, step in enumerate(executable_steps):
+            err = run_step(i, step)
             if err is not None:
                 return err
         return None
@@ -186,43 +230,55 @@ async def _apply_plan_async(
     log_file: str | None = None,
 ) -> ConformError | None:
     """
-    Execute all DDL and data-operation statements in the plan (async).
+    Execute all DDL and data-operation steps in the plan (async).
 
-    Caller must ensure connection is not already in a transaction (or use
-    commit_per_step=True). Same semantics as _apply_plan.
+    Same semantics as _apply_plan. Emits skipped_steps, then runs each step
+    (including RebuildTableStep for SQLite).
     """
-    statements = plan.statements()
-    if not statements:
-        return None
-    steps_with_sql = [s for s in plan.steps if s.sql and s.sql.strip()]
+    if plan.skipped_steps:
+        _emit_skipped_log(
+            plan.skipped_steps,
+            emit_log=emit_log,
+            log_file=log_file,
+        )
 
-    async def run_step(i: int, sql: str) -> ConformError | None:
+    executable_steps = [s for s in plan.steps if isinstance(s, RebuildTableStep) or (s.sql and s.sql.strip())]
+    if not executable_steps:
+        return None
+
+    dialect = _dialect_for_async_engine(connection.engine)
+
+    async def run_step(i: int, step: ConformStep) -> ConformError | None:
         try:
-            for part in (p.strip() for p in sql.split(";") if p.strip()):
-                await connection.execute(text(part))
-            step = steps_with_sql[i] if i < len(steps_with_sql) else None
-            desc = step.description if step else f"step_{i}"
-            _emit_apply_log(i, desc, emit_log=emit_log, log_file=log_file)
+            if isinstance(step, RebuildTableStep):
+                stmts = build_rebuild_statements(
+                    dialect, step.table_name, step.target_table, step.old_table
+                )
+                for stmt in stmts:
+                    await connection.execute(text(stmt))
+            else:
+                assert step.sql
+                for part in (p.strip() for p in step.sql.split(";") if p.strip()):
+                    await connection.execute(text(part))
+            _emit_apply_log(i, step.description, emit_log=emit_log, log_file=log_file)
             if commit_per_step:
                 await connection.commit()
             return None
         except Exception as e:
-            step = steps_with_sql[i] if i < len(steps_with_sql) else None
-            desc = step.description if step else f"step_{i}"
-            e.add_note(f"Step {i}: {desc}")
-            target = _step_target_for_error(step, i) if step else ("step", f"step_{i}")
+            e.add_note(f"Step {i}: {step.description}")
+            target = _step_target_for_error(step, i)
             return ConformError(target_objects=[target], messages=[str(e)])
 
     if commit_per_step:
-        for i, sql in enumerate(statements):
-            err = await run_step(i, sql)
+        for i, step in enumerate(executable_steps):
+            err = await run_step(i, step)
             if err is not None:
                 return err
         return None
 
     async def run_all() -> ConformError | None:
-        for i, sql in enumerate(statements):
-            err = await run_step(i, sql)
+        for i, step in enumerate(executable_steps):
+            err = await run_step(i, step)
             if err is not None:
                 return err
         return None
@@ -290,10 +346,11 @@ class DbConform:
         connection: Connection,
         models: type | Sequence[type],
         *,
-        allow_drop_table: bool = False,
-        allow_drop_column: bool = False,
-        allow_drop_constraint: bool = True,
+        allow_drop_extra_tables: bool = False,
+        allow_drop_extra_columns: bool = False,
+        allow_drop_extra_constraints: bool = True,
         allow_shrink_column: bool = False,
+        allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
     ) -> ConformPlan | ConformError:
         """
@@ -312,10 +369,11 @@ class DbConform:
             diff = differ.diff(model_schema, db_schema)
             builder = ConformPlanBuilder(
                 dialect,
-                allow_drop_table=allow_drop_table,
-                allow_drop_column=allow_drop_column,
-                allow_drop_constraint=allow_drop_constraint,
+                allow_drop_extra_tables=allow_drop_extra_tables,
+                allow_drop_extra_columns=allow_drop_extra_columns,
+                allow_drop_extra_constraints=allow_drop_extra_constraints,
                 allow_shrink_column=allow_shrink_column,
+                allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
             )
             return builder.build(diff)
@@ -330,10 +388,11 @@ class DbConform:
         self,
         models: type | Sequence[type],
         *,
-        allow_drop_table: bool = False,
-        allow_drop_column: bool = False,
-        allow_drop_constraint: bool = True,
+        allow_drop_extra_tables: bool = False,
+        allow_drop_extra_columns: bool = False,
+        allow_drop_extra_constraints: bool = True,
         allow_shrink_column: bool = False,
+        allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
     ) -> ConformPlan | ConformError:
         """
@@ -348,10 +407,11 @@ class DbConform:
             return self._compare_with_connection(
                 conn,
                 models,
-                allow_drop_table=allow_drop_table,
-                allow_drop_column=allow_drop_column,
-                allow_drop_constraint=allow_drop_constraint,
+                allow_drop_extra_tables=allow_drop_extra_tables,
+                allow_drop_extra_columns=allow_drop_extra_columns,
+                allow_drop_extra_constraints=allow_drop_extra_constraints,
                 allow_shrink_column=allow_shrink_column,
+                allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
             )
         finally:
@@ -364,10 +424,11 @@ class DbConform:
         self,
         models: type | Sequence[type],
         *,
-        allow_drop_table: bool = False,
-        allow_drop_column: bool = False,
-        allow_drop_constraint: bool = True,
+        allow_drop_extra_tables: bool = False,
+        allow_drop_extra_columns: bool = False,
+        allow_drop_extra_constraints: bool = True,
         allow_shrink_column: bool = False,
+        allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
         commit_per_step: bool = False,
         emit_log: bool = True,
@@ -390,10 +451,11 @@ class DbConform:
             plan_or_error = self._compare_with_connection(
                 conn,
                 models,
-                allow_drop_table=allow_drop_table,
-                allow_drop_column=allow_drop_column,
-                allow_drop_constraint=allow_drop_constraint,
+                allow_drop_extra_tables=allow_drop_extra_tables,
+                allow_drop_extra_columns=allow_drop_extra_columns,
+                allow_drop_extra_constraints=allow_drop_extra_constraints,
                 allow_shrink_column=allow_shrink_column,
+                allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
             )
             if isinstance(plan_or_error, ConformError):
@@ -460,10 +522,11 @@ class AsyncDbConform:
         connection: AsyncConnection,
         models: type | Sequence[type],
         *,
-        allow_drop_table: bool = False,
-        allow_drop_column: bool = False,
-        allow_drop_constraint: bool = True,
+        allow_drop_extra_tables: bool = False,
+        allow_drop_extra_columns: bool = False,
+        allow_drop_extra_constraints: bool = True,
         allow_shrink_column: bool = False,
+        allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
     ) -> ConformPlan | ConformError:
         """
@@ -482,10 +545,11 @@ class AsyncDbConform:
             diff = differ.diff(model_schema, db_schema)
             builder = ConformPlanBuilder(
                 dialect,
-                allow_drop_table=allow_drop_table,
-                allow_drop_column=allow_drop_column,
-                allow_drop_constraint=allow_drop_constraint,
+                allow_drop_extra_tables=allow_drop_extra_tables,
+                allow_drop_extra_columns=allow_drop_extra_columns,
+                allow_drop_extra_constraints=allow_drop_extra_constraints,
                 allow_shrink_column=allow_shrink_column,
+                allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
             )
             return builder.build(diff)
@@ -500,10 +564,11 @@ class AsyncDbConform:
         self,
         models: type | Sequence[type],
         *,
-        allow_drop_table: bool = False,
-        allow_drop_column: bool = False,
-        allow_drop_constraint: bool = True,
+        allow_drop_extra_tables: bool = False,
+        allow_drop_extra_columns: bool = False,
+        allow_drop_extra_constraints: bool = True,
         allow_shrink_column: bool = False,
+        allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
     ) -> ConformPlan | ConformError:
         """
@@ -516,10 +581,11 @@ class AsyncDbConform:
             return await self._compare_with_connection(
                 self._async_connection,
                 models,
-                allow_drop_table=allow_drop_table,
-                allow_drop_column=allow_drop_column,
-                allow_drop_constraint=allow_drop_constraint,
+                allow_drop_extra_tables=allow_drop_extra_tables,
+                allow_drop_extra_columns=allow_drop_extra_columns,
+                allow_drop_extra_constraints=allow_drop_extra_constraints,
                 allow_shrink_column=allow_shrink_column,
+                allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
             )
 
@@ -533,10 +599,11 @@ class AsyncDbConform:
                 return await self._compare_with_connection(
                     conn,
                     models,
-                    allow_drop_table=allow_drop_table,
-                    allow_drop_column=allow_drop_column,
-                    allow_drop_constraint=allow_drop_constraint,
+                    allow_drop_extra_tables=allow_drop_extra_tables,
+                    allow_drop_extra_columns=allow_drop_extra_columns,
+                    allow_drop_extra_constraints=allow_drop_extra_constraints,
                     allow_shrink_column=allow_shrink_column,
+                    allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                     report_extra_tables=report_extra_tables,
                 )
         finally:
@@ -546,10 +613,11 @@ class AsyncDbConform:
         self,
         models: type | Sequence[type],
         *,
-        allow_drop_table: bool = False,
-        allow_drop_column: bool = False,
-        allow_drop_constraint: bool = True,
+        allow_drop_extra_tables: bool = False,
+        allow_drop_extra_columns: bool = False,
+        allow_drop_extra_constraints: bool = True,
         allow_shrink_column: bool = False,
+        allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
         commit_per_step: bool = False,
         emit_log: bool = True,
@@ -567,10 +635,11 @@ class AsyncDbConform:
             plan_or_error = await self._compare_with_connection(
                 conn,
                 models,
-                allow_drop_table=allow_drop_table,
-                allow_drop_column=allow_drop_column,
-                allow_drop_constraint=allow_drop_constraint,
+                allow_drop_extra_tables=allow_drop_extra_tables,
+                allow_drop_extra_columns=allow_drop_extra_columns,
+                allow_drop_extra_constraints=allow_drop_extra_constraints,
                 allow_shrink_column=allow_shrink_column,
+                allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
             )
             if isinstance(plan_or_error, ConformError):
@@ -601,10 +670,11 @@ class AsyncDbConform:
                 plan_or_error = await self._compare_with_connection(
                     conn,
                     models,
-                    allow_drop_table=allow_drop_table,
-                    allow_drop_column=allow_drop_column,
-                    allow_drop_constraint=allow_drop_constraint,
+                    allow_drop_extra_tables=allow_drop_extra_tables,
+                    allow_drop_extra_columns=allow_drop_extra_columns,
+                    allow_drop_extra_constraints=allow_drop_extra_constraints,
                     allow_shrink_column=allow_shrink_column,
+                    allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                     report_extra_tables=report_extra_tables,
                 )
                 if isinstance(plan_or_error, ConformError):

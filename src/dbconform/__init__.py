@@ -15,11 +15,12 @@ except PackageNotFoundError:
 
 from dbconform.conform import AsyncDbConform, DbConform
 from dbconform.errors import ConformError
-from dbconform.plan.steps import ConformPlan
+from dbconform.plan.steps import ConformPlan, RebuildTableStep
 
 __all__ = [
     "AsyncDbConform",
     "DbConform",
     "ConformError",
     "ConformPlan",
+    "RebuildTableStep",
 ]

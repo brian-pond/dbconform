@@ -13,7 +13,7 @@ dbconform is organized around four distinct functions:
 
 The following diagram and sections describe how these functions are wired together.
 
-**Package layout:** The codebase is organized as subpackages under `dbconform`: `internal` (neutral schema types and type names), `adapters` (third-party model → internal), `compare` (DB reflection and diff), `plan` (diff → ordered steps), and `sql_dialect` (steps → DDL). The `schema` package is retained as a backward-compatibility re-export of the public API from internal, adapters, and compare.
+**Package layout:** The codebase is organized as subpackages under `dbconform`: `internal` (neutral schema types and type names), `adapters` (third-party model → internal), `compare` (DB reflection and diff), `plan` (diff → ordered steps), and `sql_dialect` (steps → DDL; includes `sqlite_rebuild` for SQLite table-rebuild logic when adding constraints). The `schema` package is retained as a backward-compatibility re-export of the public API from internal, adapters, and compare.
 
 ## Internal schema: design goals
 
@@ -58,8 +58,8 @@ flowchart LR
 
 - **ModelSchema** / **DatabaseSchema**: Internal schema (lightweight, frozen/immutable) representation of tables, columns, constraints, and indexes so the two sides can be compared by name/identity. See "Internal schema: design goals" above.
 - **SchemaDiffer**: Compares model-side internal schema to database-side internal schema; produces added, removed, modified, and extra (unmanaged) tables.
-- **ConformPlanBuilder**: Builds an ordered list of DDL and data-operation steps from the diff, with dependency-safe ordering and configurable drop behavior.
-- **DbConform** (facade): Library entry point; accepts connection or credentials and target schema, exposes `compare()` returning a **ConformPlan**.
+- **ConformPlanBuilder**: Builds an ordered list of DDL and data-operation steps from the diff, with dependency-safe ordering and configurable drop behavior. For SQLite, when adding CHECK/UNIQUE/FK constraints to existing tables, emits `RebuildTableStep` (table rebuild) when `allow_sqlite_table_rebuild=True`; otherwise records skipped steps in `plan.skipped_steps`.
+- **DbConform** (facade): Library entry point; accepts connection or credentials and target schema, exposes `compare()` returning a **ConformPlan**. The plan includes `steps`, `extra_tables`, and `skipped_steps` (steps that could not be applied, e.g. SQLite constraint add when rebuild is disabled).
 
 ## Types
 

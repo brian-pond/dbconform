@@ -133,10 +133,29 @@ else:
     print(f"Applied {len(result.steps)} step(s). Schema is conformant.")
 ```
 
-Options: `commit_per_step=True` commits after each step (partial progress on failure); `log_file="path"` appends applied steps as JSON lines to a file.
+### Options and flags
+
+Both `compare()` and `apply_changes()` accept these flags (e.g. `conform.compare(models, allow_drop_extra_tables=True)`):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `allow_drop_extra_tables` | `False` | Include DROP TABLE steps for tables in the DB but not in your models. |
+| `allow_drop_extra_columns` | `False` | Include DROP COLUMN steps for columns in the DB but not in your models. |
+| `allow_drop_extra_constraints` | `True` | Include DROP CONSTRAINT / DROP INDEX steps for constraints removed from your models. |
+| `allow_shrink_column` | `False` | Include ALTER COLUMN steps that reduce column size (e.g. VARCHAR 500→255). May truncate data; opt-in only. |
+| `allow_sqlite_table_rebuild` | `True` | For SQLite: when adding CHECK/UNIQUE/FK to existing tables, rebuild the table. Set `False` to skip; drift remains and is logged. |
+| `report_extra_tables` | `True` | Populate `plan.extra_tables` with tables in the DB but not in your models. |
+
+`apply_changes()` additionally accepts:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `commit_per_step` | `False` | Commit after each step (partial progress if a later step fails). |
+| `emit_log` | `True` | Emit JSON-line logs for applied steps to stdout. |
+| `log_file` | `None` | Optional path to append the same logs to a file. |
 
 
-## For Developers
+## For dbconform Developers
 
 
 ### Local Installation

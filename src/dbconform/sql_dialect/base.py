@@ -148,7 +148,7 @@ class Dialect(ABC):
         return f"CREATE {uniq}INDEX {self._quote(index.name)} ON {tbl} ({cols})"
 
     def drop_table_sql(self, table_name: QualifiedName) -> str:
-        """Generate DROP TABLE. Used when allow_drop_table=True (01-functional: Opt-in flags)."""
+        """Generate DROP TABLE. Used when allow_drop_extra_tables=True (01-functional: Opt-in flags)."""
         return f"DROP TABLE IF EXISTS {self.qualified_table(table_name)}"
 
     def drop_unique_sql(

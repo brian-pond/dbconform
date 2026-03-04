@@ -68,10 +68,10 @@ def test_extra_table_reported_no_drop_recompare_still_extra(
     assert recompare.extra_tables[0].name == "other_table"
 
 
-def test_extra_table_dropped_when_allow_drop_table(
+def test_extra_table_dropped_when_allow_drop_extra_tables(
     empty_db: tuple[str, str | None],
 ) -> None:
-    """Extra table in DB; compare(allow_drop_table=True) has DROP; apply_changes drops it;
+    """Extra table in DB; compare(allow_drop_extra_tables=True) has DROP; apply_changes drops it;
     recompare 0 extra (01-functional: Opt-in flags)."""
     url, target_schema = empty_db
     engine = create_engine(url)
@@ -81,7 +81,7 @@ def test_extra_table_dropped_when_allow_drop_table(
     engine.dispose()
 
     conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
-    plan_or_err = conform.compare(SimpleTable, allow_drop_table=True)
+    plan_or_err = conform.compare(SimpleTable, allow_drop_extra_tables=True)
     assert not isinstance(plan_or_err, dbconform.ConformError)
     # Plan: DROP TABLE other_table (extra) + CREATE TABLE simple_table (missing)
     assert len(plan_or_err.steps) >= 1
@@ -89,7 +89,7 @@ def test_extra_table_dropped_when_allow_drop_table(
     assert len(drop_steps) == 1
     assert "other_table" in (drop_steps[0].sql or "")
 
-    result = conform.apply_changes(SimpleTable, allow_drop_table=True)
+    result = conform.apply_changes(SimpleTable, allow_drop_extra_tables=True)
     assert not isinstance(result, dbconform.ConformError)
     recompare = conform.compare(SimpleTable)
     assert not isinstance(recompare, dbconform.ConformError)

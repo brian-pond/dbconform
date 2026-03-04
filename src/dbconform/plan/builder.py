@@ -19,6 +19,8 @@ from dbconform.plan.steps import (
     CreateIndexStep,
     CreateTableStep,
     DropTableStep,
+    RebuildTableStep,
+    SkippedStep,
 )
 from dbconform.sql_dialect.base import Dialect
 
@@ -62,8 +64,8 @@ class ConformPlanBuilder:
     """
     Builds a ConformPlan from DiffResult and dialect.
 
-    Does not emit DROP TABLE unless allow_drop_table is True. Does not emit
-    DROP COLUMN unless allow_drop_column is True. Does not emit ALTER COLUMN
+    Does not emit DROP TABLE unless allow_drop_extra_tables is True. Does not emit
+    DROP COLUMN unless allow_drop_extra_columns is True. Does not emit ALTER COLUMN
     when the change would shrink the column (e.g. reduce length) unless
     allow_shrink_column is True. Tables in DB but not in model are listed
     in plan.extra_tables for reporting only.
@@ -73,29 +75,32 @@ class ConformPlanBuilder:
         self,
         dialect: Dialect,
         *,
-        allow_drop_table: bool = False,
-        allow_drop_column: bool = False,
-        allow_drop_constraint: bool = True,
+        allow_drop_extra_tables: bool = False,
+        allow_drop_extra_columns: bool = False,
+        allow_drop_extra_constraints: bool = True,
         allow_shrink_column: bool = False,
+        allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
     ) -> None:
         self.dialect = dialect
-        self.allow_drop_table = allow_drop_table
-        self.allow_drop_column = allow_drop_column
-        self.allow_drop_constraint = allow_drop_constraint
+        self.allow_drop_extra_tables = allow_drop_extra_tables
+        self.allow_drop_extra_columns = allow_drop_extra_columns
+        self.allow_drop_extra_constraints = allow_drop_extra_constraints
         self.allow_shrink_column = allow_shrink_column
+        self.allow_sqlite_table_rebuild = allow_sqlite_table_rebuild
         self.report_extra_tables = report_extra_tables
 
     def build(self, diff: DiffResult) -> ConformPlan:
         """Produce an ordered ConformPlan from the diff."""
         steps: list[ConformStep] = []
         extra_tables: list[QualifiedName] = []
+        skipped_steps: list[SkippedStep] = []
 
         if self.report_extra_tables:
             extra_tables = list(diff.removed_tables.keys())
 
         # Drop tables first (dependents before refs): reverse of create order.
-        if self.allow_drop_table and diff.removed_tables:
+        if self.allow_drop_extra_tables and diff.removed_tables:
             drop_order = list(reversed(_topological_table_order(diff.removed_tables)))
             for name in drop_order:
                 if name not in diff.removed_tables:
@@ -133,8 +138,35 @@ class ConformPlanBuilder:
                     )
                 )
 
+        _SKIP_REASON = (
+            "SQLite does not support ADD CONSTRAINT for existing tables; "
+            "set allow_sqlite_table_rebuild=True to rebuild table (default)"
+        )
+
         for name, table_diff in diff.modified_tables.items():
-            if self.allow_drop_constraint:
+            needs_rebuild = (
+                self.dialect.name == "sqlite"
+                and self.allow_sqlite_table_rebuild
+                and (
+                    table_diff.added_checks
+                    or table_diff.added_unique
+                    or table_diff.added_foreign_keys
+                )
+            )
+
+            if needs_rebuild:
+                steps.append(
+                    RebuildTableStep(
+                        description=f"Rebuild table {name} to add constraints (SQLite)",
+                        sql=None,
+                        table_name=name,
+                        target_table=table_diff.new_table,
+                        old_table=table_diff.old_table,
+                    )
+                )
+                continue
+
+            if self.allow_drop_extra_constraints:
                 for idx in table_diff.removed_indexes:
                     sql = self.dialect.drop_index_sql(idx.name, name)
                     steps.append(
@@ -175,7 +207,7 @@ class ConformPlanBuilder:
                                 table_name=name,
                             )
                         )
-            if self.allow_drop_column:
+            if self.allow_drop_extra_columns:
                 for col in table_diff.removed_columns:
                     drop_sql = self.dialect.drop_column_sql(name, col.name)
                     if drop_sql:
@@ -210,33 +242,60 @@ class ConformPlanBuilder:
                         )
                     )
             for u in table_diff.added_unique:
-                sql = self.dialect.add_unique_sql(name, u)
-                steps.append(
-                    AlterTableStep(
-                        description=f"Add unique constraint on {name}",
-                        sql=sql,
-                        table_name=name,
-                        unique=u,
+                if self.dialect.name == "sqlite":
+                    skipped_steps.append(
+                        SkippedStep(
+                            description=f"Add unique constraint on {name}",
+                            reason=_SKIP_REASON,
+                            table_name=name,
+                        )
                     )
-                )
+                else:
+                    sql = self.dialect.add_unique_sql(name, u)
+                    steps.append(
+                        AlterTableStep(
+                            description=f"Add unique constraint on {name}",
+                            sql=sql,
+                            table_name=name,
+                            unique=u,
+                        )
+                    )
             for fk in table_diff.added_foreign_keys:
-                sql = self.dialect.add_foreign_key_sql(name, fk)
-                steps.append(
-                    AlterTableStep(
-                        description=f"Add foreign key on {name}",
-                        sql=sql,
-                        table_name=name,
+                if self.dialect.name == "sqlite":
+                    skipped_steps.append(
+                        SkippedStep(
+                            description=f"Add foreign key on {name}",
+                            reason=_SKIP_REASON,
+                            table_name=name,
+                        )
                     )
-                )
+                else:
+                    sql = self.dialect.add_foreign_key_sql(name, fk)
+                    steps.append(
+                        AlterTableStep(
+                            description=f"Add foreign key on {name}",
+                            sql=sql,
+                            table_name=name,
+                        )
+                    )
             for ck in table_diff.added_checks:
-                sql = self.dialect.add_check_sql(name, ck)
-                steps.append(
-                    AlterTableStep(
-                        description=f"Add check constraint on {name}",
-                        sql=sql,
-                        table_name=name,
+                if self.dialect.name == "sqlite":
+                    skipped_steps.append(
+                        SkippedStep(
+                            description=f"Add check constraint on {name}",
+                            reason=_SKIP_REASON,
+                            table_name=name,
+                        )
                     )
-                )
+                else:
+                    sql = self.dialect.add_check_sql(name, ck)
+                    steps.append(
+                        AlterTableStep(
+                            description=f"Add check constraint on {name}",
+                            sql=sql,
+                            table_name=name,
+                        )
+                    )
             for idx in table_diff.added_indexes:
                 sql = self.dialect.create_index_sql(idx, name)
                 steps.append(
@@ -248,4 +307,4 @@ class ConformPlanBuilder:
                     )
                 )
 
-        return ConformPlan(steps=steps, extra_tables=extra_tables)
+        return ConformPlan(steps=steps, extra_tables=extra_tables, skipped_steps=skipped_steps)

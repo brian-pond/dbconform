@@ -20,6 +20,21 @@ from dbconform.internal.objects import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class SkippedStep:
+    """
+    Record of a step that was skipped (e.g. SQLite constraint add when rebuild disabled).
+
+    description: human-readable step description (e.g. "Add check constraint on X")
+    reason: why it was skipped (e.g. "SQLite does not support ADD CONSTRAINT; allow_sqlite_table_rebuild=False")
+    table_name: table affected, if applicable.
+    """
+
+    description: str
+    reason: str
+    table_name: QualifiedName | None = None
+
+
 @dataclass(slots=True)
 class ConformStep:
     """Single step in a conform plan (DDL or data op)."""
@@ -61,9 +76,25 @@ class CreateIndexStep(ConformStep):
 
 @dataclass(slots=True)
 class DropTableStep(ConformStep):
-    """Drop a table. Emitted only when allow_drop_table=True (01-functional: Opt-in flags)."""
+    """Drop a table. Emitted only when allow_drop_extra_tables=True (01-functional: Opt-in flags)."""
 
     table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
+
+
+@dataclass(slots=True)
+class RebuildTableStep(ConformStep):
+    """
+    Rebuild an existing table (SQLite-only).
+
+    SQLite does not support ALTER TABLE ADD CONSTRAINT for CHECK, UNIQUE, or FOREIGN KEY.
+    This step creates a new table with the target schema, copies data, drops the old table,
+    and renames the new one. sql is None; execution uses dialect-specific rebuild logic.
+    See docs/requirements/01-functional.md (Schema parity scope, SQLite constraint rebuild).
+    """
+
+    table_name: QualifiedName = field(default_factory=lambda: QualifiedName(schema=None, name=""))
+    target_table: TableDef = field(default_factory=lambda: TableDef(name=QualifiedName(None, "")))
+    old_table: TableDef = field(default_factory=lambda: TableDef(name=QualifiedName(None, "")))
 
 
 @dataclass(slots=True)
@@ -73,18 +104,27 @@ class ConformPlan:
 
     steps: dependency-ordered steps to apply. extra_tables: tables present
     in DB but not in model (reported only; no DROP unless opt-in).
+    skipped_steps: steps that could not be applied (e.g. SQLite constraint add when
+    allow_sqlite_table_rebuild=False); drift remains for these.
     """
 
     steps: list[ConformStep] = field(default_factory=list)
     extra_tables: list[QualifiedName] = field(default_factory=list)
+    skipped_steps: list[SkippedStep] = field(default_factory=list)
 
     def __iter__(self) -> Iterator[ConformStep]:
         return iter(self.steps)
 
     def sql(self) -> str:
         """Return concatenated SQL of all steps (one statement per line)."""
-        return "\n".join(s.sql for s in self.steps if s.sql is not None and s.sql.strip())
+        parts: list[str] = []
+        for s in self.steps:
+            if isinstance(s, RebuildTableStep):
+                parts.append(f"-- Rebuild table {s.table_name} (SQLite: add constraints)")
+            elif s.sql and s.sql.strip():
+                parts.append(s.sql)
+        return "\n".join(parts)
 
     def statements(self) -> list[str]:
-        """Return list of SQL statements."""
+        """Return list of SQL statements (excludes RebuildTableStep; use apply executor)."""
         return [s.sql for s in self.steps if s.sql is not None and s.sql.strip()]
