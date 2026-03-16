@@ -14,6 +14,8 @@ import time
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
+from dbconform.sql_dialect.postgresql import try_connect_to_postgres
+
 try:
     import typer
 except ImportError:
@@ -27,29 +29,6 @@ POSTGRES_IMAGE = "postgres:16-alpine"
 CONTAINER_NAME = "dbconform-postgres"
 POSTGRES_PORT = 15432
 POSTGRES_URL = f"postgresql://postgres:postgres@127.0.0.1:{POSTGRES_PORT}/postgres"
-
-
-def _try_connect_postgres(url: str, timeout: float = 5.0) -> tuple[bool, str | None]:
-    """
-    Try to connect to Postgres at url (postgresql:// or postgresql+psycopg://),
-    run SELECT 1 to validate auth and database. Returns (True, None) on success;
-    (False, error_message) on failure. Requires psycopg; returns (False, 'psycopg not installed')
-    if missing.
-    """
-    try:
-        import psycopg
-    except ImportError:
-        return (False, "psycopg not installed")
-    conninfo = url.replace("postgresql+psycopg://", "postgresql://", 1)
-    try:
-        with psycopg.connect(conninfo, connect_timeout=timeout) as conn, conn.cursor() as cur:
-            cur.execute("SELECT 1")
-            cur.fetchone()
-        return (True, None)
-    except psycopg.OperationalError as e:
-        return (False, str(e).strip())
-    except Exception as e:
-        return (False, str(e).strip())
 
 
 def _get_container_runtime_path_or_none() -> str | None:
@@ -122,7 +101,7 @@ def show_version() -> None:
             "dbconform package version is unknown (distribution not installed).",
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1)  # noqa: B904
     typer.echo(v)
 
 
@@ -205,7 +184,7 @@ def _ensure_postgres_container_up(container_cmd: str) -> bool:
     Cleans up partially-created containers on failure.
     """
     if _container_running(container_cmd):
-        ok, _ = _try_connect_postgres(POSTGRES_URL, timeout=3)
+        ok, _ = try_connect_to_postgres(POSTGRES_URL, timeout=3)
         return ok
     if _container_exists(container_cmd):
         _run_subprocess([container_cmd, "start", CONTAINER_NAME], timeout=10)
@@ -230,7 +209,7 @@ def _ensure_postgres_container_up(container_cmd: str) -> bool:
             return False
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        ok, err_msg = _try_connect_postgres(POSTGRES_URL, timeout=3)
+        ok, err_msg = try_connect_to_postgres(POSTGRES_URL, timeout=3)
         if ok:
             return True
         if err_msg and "password authentication failed" in err_msg:
@@ -299,7 +278,7 @@ def postgres_up() -> None:
             typer.echo(f"Start failed: {err}", err=True)
         raise typer.Exit(1)
     # Wait for Postgres to accept TCP connections with our password (up to 30s)
-    ok, err_msg = _try_connect_postgres(POSTGRES_URL, timeout=3)
+    ok, err_msg = try_connect_to_postgres(POSTGRES_URL, timeout=3)
     if err_msg == "psycopg not installed":
         typer.echo(f"Set: DBCONFORM_TEST_POSTGRES_URL={POSTGRES_URL}")
         typer.echo(
@@ -308,7 +287,7 @@ def postgres_up() -> None:
         return
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        ok, err_msg = _try_connect_postgres(POSTGRES_URL, timeout=3)
+        ok, err_msg = try_connect_to_postgres(POSTGRES_URL, timeout=3)
         if ok:
             typer.echo(f"Set: DBCONFORM_TEST_POSTGRES_URL={POSTGRES_URL}")
             typer.echo("Connection verified (SELECT 1).")

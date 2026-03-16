@@ -276,3 +276,26 @@ class PostgreSQLDialect(Dialect):
             indexes=table_def.indexes,
             comment=table_def.comment,
         )
+
+
+def try_connect_to_postgres(url: str, timeout: float = 5.0) -> tuple[bool, str | None]:
+    """
+    Try to connect to Postgres at url (postgresql:// or postgresql+psycopg://),
+    run SELECT 1 to validate auth and database. Returns (True, None) on success;
+    (False, error_message) on failure. Requires psycopg; returns (False, 'psycopg not installed')
+    if missing.
+    """
+    try:
+        import psycopg
+    except ImportError:
+        return (False, "psycopg not installed")
+    conninfo = url.replace("postgresql+psycopg://", "postgresql://", 1)
+    try:
+        with psycopg.connect(conninfo, connect_timeout=timeout) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return (True, None)
+    except psycopg.OperationalError as e:
+        return (False, str(e).strip())
+    except Exception as e:
+        return (False, str(e).strip())
