@@ -222,6 +222,12 @@ Running tests (Docker or Podman required for PostgreSQL tests):
 dbconform test run
 ```
 
+To see the installed `dbconform` version:
+
+```bash
+dbconform version
+```
+
 See `tests/TESTS_README.md` for the full test organization.
 
 ---

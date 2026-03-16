@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
 try:
@@ -105,6 +106,24 @@ def _main_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(0)
+
+
+@app.command("version")
+def show_version() -> None:
+    """
+    Show the installed dbconform package version.
+
+    See docs/requirements/02-non-functional.md (Deployment).
+    """
+    try:
+        v = pkg_version("dbconform")
+    except PackageNotFoundError:
+        typer.echo(
+            "dbconform package version is unknown (distribution not installed).",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo(v)
 
 
 # --- test group ---
