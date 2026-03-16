@@ -223,13 +223,18 @@ class PostgreSQLDialect(Dialect):
 
     def normalize_reflected_table(self, table_def: TableDef) -> TableDef:
         """
-        Normalize reflected table so SERIAL/sequence columns compare equal to model.
+        Normalize reflected table so it compares equal to model-side internal schema.
 
-        Columns with a sequence default (nextval) and integer-like type are rewritten
-        to default=None, autoincrement=True, data_type_name=INTEGER|BIGINT so they match
-        the model's representation and no spurious ALTER steps are emitted.
+        - Columns with a sequence default (nextval) and integer-like type are rewritten
+          to default=None, autoincrement=True, data_type_name=INTEGER|BIGINT so they match
+          the model's representation and no spurious ALTER steps are emitted.
+        - Implicit single-column UNIQUE constraints (e.g. habitat.name created from
+          column unique=True) are given auto-generated names like habitat_name_key
+          in PostgreSQL. Model-side UniqueDef for such constraints has name=None,
+          so we strip the auto-generated name here to avoid drop/add churn on recompare.
         """
         INTEGER_LIKE = ("SERIAL", "INTEGER", "BIGSERIAL", "BIGINT", "INT8")
+
         new_columns: list[ColumnDef] = []
         for col in table_def.columns:
             if (
@@ -266,11 +271,25 @@ class PostgreSQLDialect(Dialect):
                         autoincrement=False,
                     )
                 )
+
+        # Normalize unique constraint names for implicit single-column uniques.
+        new_uniques: list[UniqueDef] = []
+        table_name = table_def.name.name
+        for u in table_def.unique_constraints:
+            name = u.name
+            if name and len(u.column_names) == 1:
+                col = u.column_names[0]
+                auto_name = f"{table_name}_{col}_key"
+                if name == auto_name:
+                    # Match model-side representation where name is None for column unique=True.
+                    name = None
+            new_uniques.append(UniqueDef(name=name, column_names=u.column_names))
+
         return TableDef(
             name=table_def.name,
             columns=tuple(new_columns),
             primary_key=table_def.primary_key,
-            unique_constraints=table_def.unique_constraints,
+            unique_constraints=tuple(new_uniques),
             foreign_keys=table_def.foreign_keys,
             check_constraints=table_def.check_constraints,
             indexes=table_def.indexes,

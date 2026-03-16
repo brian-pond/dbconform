@@ -14,14 +14,17 @@ import time
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
-from dbconform.sql_dialect.postgresql import try_connect_to_postgres
-
 try:
     import typer
 except ImportError:
-    print("To enable the CLI, install dbconform with optional development packages:\n\tpip install dbconform[dev]", # noqa: E501
-          file=sys.stderr)
+    print(
+        "To enable the CLI, install dbconform with optional development packages:\n\tpip install dbconform[dev]",  # noqa: E501
+        file=sys.stderr,
+    )
     sys.exit(1)
+
+
+from dbconform.sql_dialect.postgresql import try_connect_to_postgres
 
 
 # Container constants (match tests/docker-compose.yml image)
@@ -29,8 +32,6 @@ POSTGRES_IMAGE = "postgres:16-alpine"
 CONTAINER_NAME = "dbconform-postgres"
 POSTGRES_PORT = 15432
 POSTGRES_URL = f"postgresql://postgres:postgres@127.0.0.1:{POSTGRES_PORT}/postgres"
-
-
 def _get_container_runtime_path_or_none() -> str | None:
     """Return docker or podman path if available, else None. Does not echo or exit."""
     cmd = os.environ.get("DBCONFORM_CONTAINER_CMD", "").strip()

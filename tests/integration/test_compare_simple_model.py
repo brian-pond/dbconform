@@ -262,6 +262,53 @@ def test_apply_changes_execution_lanes_rebuild_check_constraints_use_new_table_c
     assert len(recompare.steps) == 0
 
 
+def test_apply_changes_unique_constraint_not_readded_on_reapply(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """Unique constraint on model column should be stable across apply_changes().
+
+    Regression for a case where a UNIQUE constraint (e.g. habitat.name) is recreated
+    on every apply_changes() run instead of reaching schema parity.
+
+    Traceability: docs/requirements/01-functional.md (Schema parity scope, unique constraints).
+    """
+    from typing import Optional
+
+    from sqlalchemy import Integer, String, Text
+    from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+    class MyBase(DeclarativeBase):
+        """Project-wide declarative base used for the regression model."""
+
+        pass
+
+    class Habitat(MyBase):
+        """Habitat with a UNIQUE name; used to reproduce unique-constraint drift."""
+
+        __tablename__ = "habitat"
+
+        id: Mapped[int] = mapped_column(Integer, primary_key=True)
+        name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+        climate: Mapped[Optional[str]] = mapped_column(String(50))
+        description: Mapped[Optional[str]] = mapped_column(Text)
+
+        def __repr__(self) -> str:
+            return f"<Habitat id={self.id} name={self.name!r}>"
+
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+
+    # First apply: should create table + unique constraint.
+    first = conform.apply_changes(Habitat)
+    assert not isinstance(first, dbconform.ConformError), str(first)
+    assert first.steps, "First apply_changes() should emit creation steps."
+
+    # Second apply: schema should already match model; no steps should be needed.
+    second = conform.apply_changes(Habitat)
+    assert not isinstance(second, dbconform.ConformError), str(second)
+    assert len(second.steps) == 0
+
+
 def test_apply_changes_sqlite_rebuild_with_index_succeeds(
     empty_sqlite_db: tuple[Path, str],
 ) -> None:
