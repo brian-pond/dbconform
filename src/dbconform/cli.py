@@ -9,10 +9,17 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
-import typer
+try:
+    import typer
+except ImportError:
+    print("To enable the CLI, install dbconform with optional development packages:\n\tpip install dbconform[dev]", # noqa: E501
+          file=sys.stderr)
+    sys.exit(1)
+
 
 # Container constants (match tests/docker-compose.yml image)
 POSTGRES_IMAGE = "postgres:16-alpine"
