@@ -2,14 +2,15 @@
 
 **Your database schema has drifted. `dbconform` fixes it.**
 
-Over time, databases diverge from your SQLAlchemy models — columns get added manually, constraints go missing, a hotfix gets applied directly to the DB and never captured in code. This is *database drift*, and it's a silent, compounding problem.
+Over time, databases can diverge from your SQLAlchemy models — columns get added manually, constraints go missing, a hotfix gets applied directly to the DB and never captured in code. This is *database drift*, and it's a real-world, compounding problem.
 
-SQLAlchemy's `create_all()` only creates *new* tables. Alembic works well for disciplined linear migrations, but it has no answer for drift: when your database has diverged from your migration history, you're on your own.
+SQLAlchemy's `create_all()` only creates new tables. Alembic works well for disciplined linear migrations, but it has no answer for drift: when your database diverges from your migration history, you're on your own.
 
-`dbconform` inspects your live database, compares it against your SQLAlchemy (or SQLModel) models, and either tells you exactly what's wrong — or fixes it.
+`dbconform` inspects your live database, compares it against your SQLAlchemy (or SQLModel) models, and either tells you exactly what's wrong — or *fixes* it.
 
 ```python
 from dbconform import DbConform
+from my_app.my_alchemy_schemas import Product, Cart # your own models
 
 conform = DbConform(credentials={"url": "sqlite:///./mydb.sqlite"})
 result = conform.apply_changes([Product, Cart])
@@ -17,7 +18,7 @@ result = conform.apply_changes([Product, Cart])
 print(f"Applied {len(result.steps)} change(s). Target database schema is conformant.")
 ```
 
-That's it. No migration files. No history table. No CLI. No infrastructure.
+That's it. No migration files, history table, CLI, or additional infrastructure.
 
 ✅ &nbsp;&nbsp;Supports both sync/async Python\
 ✅ &nbsp;&nbsp;SQLite\
@@ -28,7 +29,7 @@ That's it. No migration files. No history table. No CLI. No infrastructure.
 
 ## Why not Alembic?
 
-Alembic is excellent when you start clean and stay disciplined. But in the real world:
+Alembic is excellent when you start clean -and- stay disciplined. But that's just not always the situation we find ourselves in.  So I wanted a tool that just fixes the problems, and lets me get on with my work:
 
 | Capability | SQLAlchemy `create_all` | Alembic | Atlas | **dbconform** |
 |---|:---:|:---:|:---:|:---:|
@@ -47,11 +48,11 @@ Alembic is excellent when you start clean and stay disciplined. But in the real 
 
 ## When to use dbconform
 
-- You inherited a database and the migrations have gone sideways
-- You're running SQLite in development and Postgres in production — and they've diverged
-- You want to programmatically enforce schema conformance at application startup
-- You don't want to manage migration history at all
-- You ran a hotfix directly on the database and need to reconcile
+- You inherited a database and models, but the migrations have gone sideways.
+- You're running SQLite in development and Postgres in production — and they've structurally diverged
+- You want to programmatically enforce schema conformance at application startup (*one of my personal favorites*)
+- You don't want to manage migration history at all, with something like Alembic.
+- Someone ran a hotfix directly on the database and now you need to reconcile.
 
 ---
 
