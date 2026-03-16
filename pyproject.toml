@@ -30,6 +30,7 @@ async = [
     "asyncpg",
 ]
 dev = [
+    "bumpver",
     "build",
     "pytest",
     "pytest-asyncio",
@@ -58,3 +59,14 @@ where = ["src"]
 
 [project.scripts]
 dbconform = "dbconform.cli:main"
+
+[tool.bumpver]
+current_version = "0.1.7"
+version_pattern = "MAJOR.MINOR.PATCH"
+commit = true
+tag = true
+
+[tool.bumpver.file_patterns]
+"pyproject.toml" = [
+    'version = "{version}"',
+]
