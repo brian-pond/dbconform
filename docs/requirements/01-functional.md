@@ -66,7 +66,7 @@ Elements that dbconform compares and corrects (add/alter as per default behavior
 - **Backfilling**: When new columns are added, dbconform can backfill them with default or constant values where applicable.
 - **Type changes**: When column types are altered, existing data may be transformed to match the new type.
 - **Adding NOT NULL to a column that contains NULLs**: If the model defines a **default** for that column, dbconform applies it (backfill) so the column can be made NOT NULL. If the model has **no default**, dbconform **errors** and requires the caller to backfill the NULLs themselves before retrying conform.
-- **Data-loss risk**: When a change may cause data loss (e.g. reducing the length of a string field), dbconform does not emit the ALTER step unless the caller sets **allow_shrink_column** (e.g. `compare(..., allow_shrink_column=True)`). Default is false so shrinking a column requires explicit opt-in.
+- **Data-loss risk**: When a change may cause data loss (e.g. reducing the length of a string field), dbconform does not emit the ALTER step unless the caller sets **allow_shrink_column** (e.g. `compare(..., allow_shrink_column=True)`). Default is false so shrinking a column requires explicit opt-in. When a shrink is skipped, the would-be ALTER is recorded in `plan.skipped_steps` and exposed via `skipped_step` logs so callers can see that drift remains and decide whether to re-run with `allow_shrink_column=True`.
 
 ### Column rename (future phase — Phase 2)
 - **Goal**: Support indicating that a column was renamed in the model (e.g. `bar` → `baz` on table `foo`). Some databases support `RENAME COLUMN`; others require: add new column → copy data from old column → drop old column.

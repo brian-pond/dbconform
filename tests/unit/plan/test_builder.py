@@ -132,7 +132,7 @@ def test_builder_removed_column_drop_when_allow_drop_extra_columns() -> None:
 
 
 def test_builder_alter_shrink_skipped_without_allow_shrink_column() -> None:
-    """When change would shrink column length, no ALTER step unless allow_shrink_column=True."""
+    """When change would shrink column length, record skipped_step unless allow_shrink_column=True."""
     qualified = QualifiedName(None, "t")
     old_table = TableDef(
         name=qualified,
@@ -176,10 +176,17 @@ def test_builder_alter_shrink_skipped_without_allow_shrink_column() -> None:
         def alter_column_sql(self, _table_name, _old_column, _new_column):
             return 'ALTER TABLE "t" ALTER COLUMN "name" VARCHAR(255)'
 
-    plan_no_shrink = ConformPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=False).build(diff)
+    plan_no_shrink = ConformPlanBuilder(
+        ShrinkCapableDialect(), allow_shrink_column=False
+    ).build(diff)
     assert len(plan_no_shrink.steps) == 0
+    assert len(plan_no_shrink.skipped_steps) == 1
+    assert isinstance(plan_no_shrink.skipped_steps[0], SkippedStep)
+    assert "shrink" in plan_no_shrink.skipped_steps[0].reason.lower()
 
-    plan_allow_shrink = ConformPlanBuilder(ShrinkCapableDialect(), allow_shrink_column=True).build(diff)
+    plan_allow_shrink = ConformPlanBuilder(
+        ShrinkCapableDialect(), allow_shrink_column=True
+    ).build(diff)
     assert len(plan_allow_shrink.steps) == 1
     assert "ALTER COLUMN" in (plan_allow_shrink.steps[0].sql or "")
 

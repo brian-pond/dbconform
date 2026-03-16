@@ -232,6 +232,13 @@ class ConformPlanBuilder:
                 alter_sql = self.dialect.alter_column_sql(name, old_col, new_col)
                 if alter_sql:
                     if self.dialect.would_shrink(old_col, new_col) and not self.allow_shrink_column:
+                        skipped_steps.append(
+                            SkippedStep(
+                                description=f"Alter column {new_col.name} on {name}",
+                                reason="Column shrink blocked: allow_shrink_column=False",
+                                table_name=name,
+                            )
+                        )
                         continue
                     steps.append(
                         AlterTableStep(
