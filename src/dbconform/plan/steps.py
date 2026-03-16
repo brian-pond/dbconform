@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TextIO
+import sys
 
 from dbconform.internal.objects import (
     ColumnDef,
@@ -128,3 +129,42 @@ class ConformPlan:
     def statements(self) -> list[str]:
         """Return list of SQL statements (excludes RebuildTableStep; use apply executor)."""
         return [s.sql for s in self.steps if s.sql is not None and s.sql.strip()]
+
+    def summary(self) -> str:
+        """
+        Return a human-readable summary of the plan.
+
+        Includes counts of steps, extra_tables, and skipped_steps, plus brief details
+        for each section. See docs/requirements/01-functional.md (Plan and DDL order)
+        and 02-non-functional.md (Observability).
+        """
+        lines: list[str] = []
+        lines.append(
+            f"ConformPlan: {len(self.steps)} steps, "
+            f"{len(self.extra_tables)} extra tables, "
+            f"{len(self.skipped_steps)} skipped steps"
+        )
+        if self.steps:
+            lines.append("Steps:")
+            for step in self.steps:
+                lines.append(f"- {step.description}")
+        if self.extra_tables:
+            lines.append("Extra tables:")
+            for name in self.extra_tables:
+                lines.append(f"- {name}")
+        if self.skipped_steps:
+            lines.append("Skipped steps:")
+            for s in self.skipped_steps:
+                table = f" on {s.table_name}" if s.table_name is not None else ""
+                lines.append(f"- {s.description}{table} (reason: {s.reason})")
+        return "\n".join(lines)
+
+    def print_summary(self, file: TextIO | None = None) -> None:
+        """
+        Pretty-print the plan summary to a file-like object (stdout by default).
+
+        Convenience wrapper around summary() so callers can quickly inspect
+        planned steps, extra tables, and skipped steps.
+        """
+        target = file if file is not None else sys.stdout
+        target.write(self.summary() + "\n")

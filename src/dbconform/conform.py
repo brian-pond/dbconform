@@ -498,7 +498,7 @@ class DbConform:
             )
             if isinstance(plan_or_error, ConformError):
                 return plan_or_error
-            plan = plan_or_error
+            plan: ConformPlan = plan_or_error
             if not commit_per_step and not conn.in_transaction():
                 conn.commit()
             apply_err = _apply_plan(

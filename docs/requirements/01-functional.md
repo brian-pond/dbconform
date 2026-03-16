@@ -45,6 +45,7 @@
 
 ### Plan and DDL order
 - DDL and data-operation steps must be produced in a **valid execution order**: dependencies must be respected (e.g. create table before creating a foreign key that references it). Documentation and implementation must reflect this.
+- The compare/apply flow returns a `ConformPlan` object with three main elements: `steps` (ordered DDL/data operations), `extra_tables` (tables present only in the DB), and `skipped_steps` (differences intentionally not applied due to safety flags or backend limits). `ConformPlan.summary()` / `print_summary()` provide a human-readable summary of these elements for ad‑hoc inspection.
 
 ### Error handling
 - When conform or compare fails, the API returns a **structured Error object** to the caller (not only an exception or string). The structure must allow the caller to determine **which target objects** did not conform and **why**, so that callers can handle or report failures precisely.

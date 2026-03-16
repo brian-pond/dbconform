@@ -21,6 +21,7 @@
 ### Auditability and logging
 - **Minimum**: All applied changes (and relevant dry-run outcomes) are emitted as **structured** logs to **stdout** when `emit_log=True` (default on `apply_changes()`). The format must be **machine-parseable** (e.g. JSON lines) to support tooling and CI.
 - **Skipped differences**: When a schema difference is intentionally not applied due to a safety flag (e.g. `allow_sqlite_table_rebuild=False` or `allow_shrink_column=False`), it is recorded in `plan.skipped_steps` and emitted as a `"skipped_step"` JSON event so callers can see which tables/columns still differ and why.
+- **Human-readable summaries**: For ad‑hoc debugging or REPL use, callers can use `ConformPlan.summary()` / `print_summary()` to inspect steps, extra tables, and skipped steps in a concise textual summary in addition to structured logs.
 - **Optional**: `emit_log=False` on `apply_changes()` suppresses stdout emission (for library use when the caller manages logging elsewhere). When set, `log_file` can still be used to append to a file.
 - **Optional**: An option must exist to **also** write the same (or a human-readable) log to a **text file** via `log_file`, for local audit trails or archival.
 
