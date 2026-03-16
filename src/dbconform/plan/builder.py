@@ -213,11 +213,20 @@ class ConformPlanBuilder:
                     if drop_sql:
                         steps.append(
                             AlterTableStep(
-                                description=f"Drop column {col.name} from {name}",
+                                description=f"Drop column `{col.name}` from `{name}`",
                                 sql=drop_sql,
                                 table_name=name,
                             )
                         )
+            else:
+                for col in table_diff.removed_columns:
+                    skipped_steps.append(
+                        SkippedStep(
+                            description=f"Drop column `{col.name}` from `{name}`",
+                            reason="Column drop blocked: allow_drop_extra_columns=False",
+                            table_name=name,
+                        )
+                    )
             for col in table_diff.added_columns:
                 sql = self.dialect.add_column_sql(name, col)
                 steps.append(

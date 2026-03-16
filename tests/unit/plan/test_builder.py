@@ -131,6 +131,48 @@ def test_builder_removed_column_drop_when_allow_drop_extra_columns() -> None:
     assert "extra" in (plan.steps[0].sql or "")
 
 
+def test_builder_removed_column_skipped_without_allow_drop_extra_columns() -> None:
+    """Modified table with removed column -> skipped_steps when allow_drop_extra_columns=False (default).
+    
+    Traceability: docs/requirements/01-functional.md (Opt-in flags, Plan and DDL order).
+    Extra columns require opt-in to drop (data loss risk); when blocked, recorded in skipped_steps.
+    """
+    qualified = QualifiedName(None, "t")
+    old_table = TableDef(
+        name=qualified,
+        columns=(
+            ColumnDef("id", "INTEGER", nullable=False),
+            ColumnDef("extra", "TEXT", nullable=True),
+        ),
+    )
+    new_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("id", "INTEGER", nullable=False),),
+    )
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict(),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        removed_columns=(ColumnDef("extra", "TEXT", nullable=True),),
+                    ),
+                ),
+            ]
+        ),
+    )
+    plan = ConformPlanBuilder(SQLiteDialect(), allow_drop_extra_columns=False).build(diff)
+    assert len(plan.steps) == 0
+    assert len(plan.skipped_steps) == 1
+    assert isinstance(plan.skipped_steps[0], SkippedStep)
+    assert "extra" in plan.skipped_steps[0].description
+    assert "allow_drop_extra_columns=False" in plan.skipped_steps[0].reason
+
+
 def test_builder_alter_shrink_skipped_without_allow_shrink_column() -> None:
     """When change would shrink column length, record skipped_step unless allow_shrink_column=True."""
     qualified = QualifiedName(None, "t")

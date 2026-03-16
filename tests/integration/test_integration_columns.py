@@ -83,7 +83,11 @@ def test_multiple_columns_missing_in_db_apply_changes_then_parity(
 def test_one_extra_column_in_db_no_drop_recompare_still_different(
     empty_db: tuple[str, str | None],
 ) -> None:
-    """One extra column in DB. No DROP; apply_changes no-op; recompare still shows difference."""
+    """One extra column in DB. No DROP; apply_changes no-op; recompare still shows difference.
+    
+    Traceability: docs/requirements/01-functional.md (Opt-in flags, allow_drop_extra_columns).
+    Extra columns require opt-in; when blocked, drift is recorded in skipped_steps.
+    """
     url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -102,16 +106,25 @@ def test_one_extra_column_in_db_no_drop_recompare_still_different(
     assert not isinstance(plan_or_err, dbconform.ConformError)
     assert not any("DROP" in (s.sql or "") for s in plan_or_err.steps)
     assert len(plan_or_err.steps) == 0
+    # Extra column should be recorded in skipped_steps
+    assert len(plan_or_err.skipped_steps) == 1
+    assert "extra_col" in plan_or_err.skipped_steps[0].description
+    assert "allow_drop_extra_columns=False" in plan_or_err.skipped_steps[0].reason
 
     conform.apply_changes(SimpleTable)
     recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
+    assert len(recompare.skipped_steps) == 1  # Still skipped after apply
     col_names = _table_column_names(url, "simple_table", target_schema)
     assert "extra_col" in col_names
 
 
 def test_multiple_extra_columns_in_db_no_drop(empty_db: tuple[str, str | None]) -> None:
-    """Multiple extra columns in DB. No DROP; recompare still has extra columns."""
+    """Multiple extra columns in DB. No DROP; recompare still has extra columns.
+    
+    Traceability: docs/requirements/01-functional.md (Opt-in flags).
+    Multiple extra columns all recorded in skipped_steps.
+    """
     url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -130,16 +143,26 @@ def test_multiple_extra_columns_in_db_no_drop(empty_db: tuple[str, str | None]) 
     assert not isinstance(plan_or_err, dbconform.ConformError)
     assert len(plan_or_err.steps) == 0
     assert not any("DROP" in (s.sql or "") for s in plan_or_err.steps)
+    # Both extra columns should be in skipped_steps
+    assert len(plan_or_err.skipped_steps) == 2
+    descriptions = [s.description for s in plan_or_err.skipped_steps]
+    assert any("a" in d for d in descriptions)
+    assert any("b" in d for d in descriptions)
 
     conform.apply_changes(SimpleTable)
     recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
+    assert len(recompare.skipped_steps) == 2
 
 
 def test_one_missing_one_extra_add_only_extra_remains(
     empty_db: tuple[str, str | None],
 ) -> None:
-    """One missing, one extra. Plan ADD only; apply_changes; extra column still present."""
+    """One missing, one extra. Plan ADD only; apply_changes; extra column still present.
+    
+    Traceability: docs/requirements/01-functional.md (add/alter by default, drops require opt-in).
+    Extra column in skipped_steps; missing column in steps.
+    """
     url, target_schema = empty_db
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -159,10 +182,56 @@ def test_one_missing_one_extra_add_only_extra_remains(
     assert len(plan_or_err.steps) == 1
     assert "value" in plan_or_err.sql()
     assert "DROP" not in plan_or_err.sql()
+    # Extra column in skipped_steps
+    assert len(plan_or_err.skipped_steps) == 1
+    assert "extra_col" in plan_or_err.skipped_steps[0].description
 
     result = conform.apply_changes(SimpleTable)
     assert not isinstance(result, dbconform.ConformError)
     recompare = conform.compare(SimpleTable)
     assert len(recompare.steps) == 0
+    assert len(recompare.skipped_steps) == 1  # Extra column still skipped
     col_names = _table_column_names(url, "simple_table", target_schema)
     assert "extra_col" in col_names
+
+
+def test_extra_column_dropped_when_allow_drop_extra_columns(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """Extra column in DB. DROP COLUMN when allow_drop_extra_columns=True; then parity.
+    
+    Traceability: docs/requirements/01-functional.md (Opt-in flags, allow_drop_extra_columns).
+    When opt-in is enabled, extra columns are dropped and parity is achieved.
+    """
+    url, target_schema = empty_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE simple_table ("
+                "id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL, "
+                "value FLOAT NOT NULL, count INTEGER NOT NULL, extra_col TEXT)"
+            )
+        )
+        conn.commit()
+    engine.dispose()
+
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+    plan_or_err = conform.compare(SimpleTable, allow_drop_extra_columns=True)
+    assert not isinstance(plan_or_err, dbconform.ConformError)
+    assert len(plan_or_err.steps) == 1
+    assert "DROP COLUMN" in plan_or_err.sql()
+    assert "extra_col" in plan_or_err.sql()
+    assert len(plan_or_err.skipped_steps) == 0  # Not skipped when allowed
+
+    result = conform.apply_changes(SimpleTable, allow_drop_extra_columns=True)
+    assert not isinstance(result, dbconform.ConformError)
+    
+    # After apply, column should be gone
+    col_names = _table_column_names(url, "simple_table", target_schema)
+    assert "extra_col" not in col_names
+    
+    # Recompare should show parity
+    recompare = conform.compare(SimpleTable)
+    assert len(recompare.steps) == 0
+    assert len(recompare.skipped_steps) == 0
