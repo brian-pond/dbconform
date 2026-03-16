@@ -113,6 +113,21 @@ else:
     print(result.sql())  # Full DDL script
 ```
 
+**View a human-readable summary:**
+
+```python
+result.print_summary()
+# Output:
+# ConformPlan: 2 steps, 0 extra tables, 1 skipped steps
+# Steps:
+# - Add column price to product
+# - Create table cart
+# Skipped steps:
+# - Drop column legacy_field from product (reason: Column drop blocked: allow_drop_extra_columns=False)
+```
+
+The summary shows planned steps, extra tables (in DB but not in models), and skipped steps (drift that requires opt-in to fix).
+
 ### 3. Apply changes
 
 ```python
