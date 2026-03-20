@@ -4,6 +4,9 @@ All notable changes to the requirements docs are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Model → DDL column defaults:** Python scalars on SQLAlchemy/SQLModel columns (e.g. `Field(default=date(1970, 1, 1))` on `DATE`) were emitted as `DEFAULT 1970-01-01`, which PostgreSQL parses as integer subtraction, not a date literal, causing datatype errors. dbconform now emits proper quoted literals for common scalar types and keeps `str(default.arg)` only for SQLAlchemy `ClauseElement` args (e.g. `server_default=text(...)`). See docs/technical/05-model-column-defaults.md.
+
 ### Added
 - **SQLite constraint rebuild:** SQLite cannot add CHECK, UNIQUE, or FOREIGN KEY constraints to existing tables via ALTER TABLE. dbconform now rebuilds such tables by default (create new with constraints, copy data, drop old, rename) to achieve full schema parity. Opt-out via `allow_sqlite_table_rebuild=False`; skipped steps are recorded in `plan.skipped_steps` and logged (`event: skipped_step`). See 01-functional (Schema parity scope, Opt-in flags).
 - **Shrink-related skips:** When a column-length change would shrink data and `allow_shrink_column=False`, dbconform now records the would-be ALTER as an entry in `plan.skipped_steps` and emits a `"skipped_step"` log event so callers can see that drift remains and optionally re-run with `allow_shrink_column=True`. See 01-functional (Data operations, Data-loss risk) and 02-non-functional (Observability).

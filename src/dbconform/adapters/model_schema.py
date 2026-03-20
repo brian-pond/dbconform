@@ -9,16 +9,25 @@ definitions and build a ModelSchema (name -> TableDef). See docs/requirements/01
 model.__table__ and its columns/constraints/indexes; we never assign to or modify
 the caller's Table or column objects. ModelSchema stores only internal TableDef
 instances, not references to the original tables.
+
+**Column defaults:** How Python and server defaults become DDL strings (including the
+PostgreSQL date-literal pitfall) is documented in docs/technical/05-model-column-defaults.md.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
+from datetime import date, datetime, time
+from decimal import Decimal
+from enum import Enum
 from typing import Any, Protocol
+from uuid import UUID
 
 from sqlalchemy import Table
 from sqlalchemy.engine import Dialect
 from sqlalchemy.schema import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
+from sqlalchemy.sql.elements import ClauseElement
 
 from dbconform.adapters.sa_to_neutral import sa_column_to_neutral_type
 from dbconform.internal.objects import (
@@ -69,15 +78,72 @@ def _check_expression_str(sqltext: Any) -> str:
     return str(sqltext)
 
 
-def _default_expr(column: Any, _dialect: Dialect) -> str | None:
-    """Return server default expression as string, or None."""
+def _python_scalar_to_sql_literal(value: Any) -> str | None:
+    """
+    Map a Python scalar to a SQL DEFAULT fragment (dialect-agnostic literals).
+
+    Used when SQLAlchemy's column ``default`` carries a Python value (e.g. SQLModel
+    ``Field(default=date(...))``). Must not use ``str(value)`` alone: bare dates
+    would emit ``1970-01-01``, which PostgreSQL parses as integer subtraction, not
+    a DATE literal. See docs/technical/05-model-column-defaults.md.
+
+    Traceability: docs/requirements/01-functional.md (Schema parity: column defaults).
+
+    Returns:
+        A string safe to place after ``DEFAULT `` in DDL, or None if no static
+        literal can be produced (unknown types, non-finite float).
+    """
+    if isinstance(value, datetime):
+        inner = value.isoformat(sep=" ").replace("'", "''")
+        return f"'{inner}'"
+    if isinstance(value, date):
+        return f"'{value.isoformat()}'"
+    if isinstance(value, time):
+        return f"'{value.isoformat()}'"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    if isinstance(value, Enum):
+        return _python_scalar_to_sql_literal(value.value)
+    if isinstance(value, UUID):
+        return "'" + str(value).replace("'", "''") + "'"
+    return None
+
+
+def _default_expr(column: Any, _dialect: Dialect | None) -> str | None:
+    """
+    Return a column default as a SQL expression string for DDL, or None.
+
+    Prefer ``server_default``; otherwise use ``default`` (Python-side). Callable
+    ``.arg`` (e.g. ``default_factory``) yields None—no static DDL.
+
+    For ``.arg`` that is a SQLAlchemy :class:`~sqlalchemy.sql.elements.ClauseElement`
+    (typical for ``server_default=text(...)`` and many reflected defaults),
+    ``str(.arg)`` is used so quoting matches SQLAlchemy's rendering.
+
+    For other ``.arg`` values, :func:`_python_scalar_to_sql_literal` produces quoted
+    literals. See docs/technical/05-model-column-defaults.md (PostgreSQL date bug).
+
+    Traceability: docs/requirements/01-functional.md (Schema parity: columns, defaults).
+    """
     default = getattr(column, "server_default", None) or getattr(column, "default", None)
     if default is None:
         return None
     if hasattr(default, "arg") and default.arg is not None:
         if callable(default.arg):
             return None  # Python-side default; no DDL expression
-        return str(default.arg)
+        if isinstance(default.arg, ClauseElement):
+            return str(default.arg)
+        return _python_scalar_to_sql_literal(default.arg)
     if hasattr(default, "text") and default.text is not None:
         return default.text
     return None

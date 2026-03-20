@@ -2,10 +2,29 @@
 Unit tests for ModelSchema and ingestion.
 
 Traceability: docs/technical/02-architecture.md (Adapters, read-only contract);
+docs/technical/05-model-column-defaults.md (Python scalar defaults → DDL);
 docs/requirements/01-functional.md (Model discovery and API).
 """
 
 from __future__ import annotations
+
+from datetime import date
+
+from sqlalchemy import Date, Integer
+from sqlmodel import Field, SQLModel
+
+
+class _SQLModelDateDefaultRow(SQLModel, table=True):
+    """
+    Module-level SQLModel so annotations like ``date`` resolve (see SQLModel + ForwardRef).
+
+    Traceability: docs/technical/05-model-column-defaults.md.
+    """
+
+    __tablename__ = "sqlmodel_date_default_ingest"
+
+    id: int | None = Field(default=None, primary_key=True)
+    effective_from: date = Field(default=date(1970, 1, 1))
 
 
 def _table_fingerprint(table: object) -> tuple[object, ...]:
@@ -117,3 +136,98 @@ def test_check_constraint_in_clause_expands_to_literals() -> None:
         assert "IN (" in ck.expression
         # Values should be literal strings
         assert "'sequential'" in ck.expression or "'high'" in ck.expression or "'parallel'" in ck.expression
+
+
+def test_python_date_default_emits_quoted_sql_literal() -> None:
+    """
+    Bare str(date) in DDL breaks PostgreSQL (parses as 1970 - 1 - 1).
+
+    Regression: docs/technical/05-model-column-defaults.md.
+    """
+    from sqlalchemy import Column, Date
+    from sqlalchemy.orm import DeclarativeBase
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Row(Base):
+        __tablename__ = "row_date_default"
+        id = Column(Integer, primary_key=True)
+        effective_from = Column(Date, nullable=False, default=date(1970, 1, 1))
+
+    schema = ModelSchema.from_models(Row)
+    table_def = next(iter(schema.tables.values()))
+    col = table_def.column_by_name()["effective_from"]
+    assert col.default == "'1970-01-01'"
+
+
+def test_sqlmodel_field_date_default_emits_quoted_literal() -> None:
+    """SQLModel Field(default=date(...)) uses Python-side default; same quoting rule applies."""
+    from dbconform.adapters.model_schema import ModelSchema
+
+    schema = ModelSchema.from_models(_SQLModelDateDefaultRow)
+    table_def = next(iter(schema.tables.values()))
+    assert table_def.column_by_name()["effective_from"].default == "'1970-01-01'"
+
+
+def test_python_scalar_defaults_string_bool_datetime() -> None:
+    """Strings (with escape), bool, and datetime map to SQL literal fragments."""
+    from datetime import datetime
+
+    from sqlalchemy import Boolean, Column, DateTime, String, Text
+    from sqlalchemy.orm import DeclarativeBase
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Row(Base):
+        __tablename__ = "row_mixed_defaults"
+        id = Column(Integer, primary_key=True)
+        label = Column(String(50), default="O'Brien")
+        active = Column(Boolean, default=True)
+        created = Column(DateTime, default=datetime(2020, 1, 2, 3, 4, 5))
+        body = Column(Text, default="x")
+
+    schema = ModelSchema.from_models(Row)
+    table_def = next(iter(schema.tables.values()))
+    by = table_def.column_by_name()
+    assert by["label"].default == "'O''Brien'"
+    assert by["active"].default == "TRUE"
+    assert by["created"].default == "'2020-01-02 03:04:05'"
+    assert by["body"].default == "'x'"
+
+
+def test_server_default_text_clause_unchanged_for_date_string() -> None:
+    """ClauseElement .arg still uses str() so SQL quoting matches SQLAlchemy."""
+    from sqlalchemy import Column, text
+    from sqlalchemy.orm import DeclarativeBase
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Row(Base):
+        __tablename__ = "row_server_date"
+        id = Column(Integer, primary_key=True)
+        d = Column(Date, nullable=False, server_default=text("'1970-01-01'"))
+
+    schema = ModelSchema.from_models(Row)
+    assert next(iter(schema.tables.values())).column_by_name()["d"].default == "'1970-01-01'"
+
+
+def test_python_scalar_to_sql_literal_rejects_unknown_and_nan() -> None:
+    """Unserializable scalars must not become misleading str(value) DDL fragments."""
+    import math
+
+    from dbconform.adapters.model_schema import _python_scalar_to_sql_literal
+
+    assert _python_scalar_to_sql_literal(object()) is None
+    assert _python_scalar_to_sql_literal(float("nan")) is None
+    assert _python_scalar_to_sql_literal(float("inf")) is None
+    assert _python_scalar_to_sql_literal(b"bytes") is None
+    assert _python_scalar_to_sql_literal(math.pi) == str(math.pi)

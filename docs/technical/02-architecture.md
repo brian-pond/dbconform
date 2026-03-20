@@ -7,7 +7,7 @@ High-level data flow for comparing code models to a live database and producing 
 dbconform is organized around four distinct functions:
 
 1. **Internal schema** — Defines a neutral, library-agnostic representation of a SQL table's schema (tables, columns, constraints, indexes). No dependency on SQLAlchemy, Django, or other ORMs.
-2. **Adapters (ingest)** — Take well-known third-party models (SQLAlchemy, SQLModel; later Django, Tortoise, Piccolo) and produce the dbconform internal schema. Ingestion is **read-only**: we do not modify the caller's model classes or their `__table__` / columns.
+2. **Adapters (ingest)** — Take well-known third-party models (SQLAlchemy, SQLModel; later Django, Tortoise, Piccolo) and produce the dbconform internal schema. Ingestion is **read-only**: we do not modify the caller's model classes or their `__table__` / columns. Column defaults from models are turned into SQL fragments for DDL; see [05-model-column-defaults.md](05-model-column-defaults.md) for behavior and an incident record (Python `date` defaults vs PostgreSQL).
 3. **Compare** — Reflect a live database into the database-side internal schema and compare it to the model-side internal schema; produce a structured diff (added, removed, modified).
 4. **DDL generation** — From the comparison result, build an ordered plan and generate dialect-specific DDL to bring the target database into parity with the model.
 
