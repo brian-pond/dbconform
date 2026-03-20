@@ -22,7 +22,7 @@ Single place for dbconform library and package choices: rationale, alternatives,
 - **`[postgres]`** (pyproject.toml): Used only for running integration tests against PostgreSQL.
   - **psycopg** ([binary] extra, >=3): PostgreSQL driver for SQLAlchemy (`postgresql+psycopg://`). Chosen over psycopg2 for modern API and maintenance. See [01-test-database.md](01-test-database.md).
 
-- **`[dev]`** (pyproject.toml): Development and test tooling. **typer** (>=0.9): CLI framework for the `dbconform` script (e.g. `dbconform test run`, `dbconform test postgres up`). See [01-functional](../requirements/01-functional.md) (CLI scope) and [01-test-database.md](01-test-database.md).
+- **`[dev]`** (pyproject.toml): Development and test tooling. **typer** (>=0.9): CLI framework for the `dbconform` script (e.g. `dbconform test run`, `dbconform test postgres up`). **commitizen** (`cz`): semver bumps via the root `Makefile` `release` target (`uv run cz`). **build**: PEP 517 builds (`python -m build`). **twine**: upload wheels/sdists to an index. See [01-functional](../requirements/01-functional.md) (CLI scope) and [01-test-database.md](01-test-database.md).
 
 ## Version policy (Phase 1)
 

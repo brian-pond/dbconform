@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbconform"
-version = "0.2.5"
+version = "0.2.6"
 description = "Synchronize database schema to models — document-driven project."
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,6 +36,7 @@ dev = [
     "pytest-asyncio",
     "ruff",
     "sqlmodel",
+    "twine",
     "typer>=0.9",
 ]
 postgres = [
@@ -61,7 +62,7 @@ where = ["src"]
 dbconform = "dbconform.cli:main"
 
 [tool.commitizen]
-version = "0.2.5"
+version = "0.2.6"
 version_scheme = "semver"
 commit = true
 tag = true

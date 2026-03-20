@@ -1,6 +1,7 @@
+# Requires: uv, git. Install dev tools with: uv sync --extra dev
 release:
-	cz bump --increment patch
-    git push
-	pip install --force-reinstall .
-	python -m build
-	twine upload dist/*
+	uv run cz bump --increment patch
+	git push
+	uv pip install --force-reinstall .
+	uv run python -m build
+	uv run twine upload dist/*
