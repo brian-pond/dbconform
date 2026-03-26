@@ -231,3 +231,70 @@ def test_python_scalar_to_sql_literal_rejects_unknown_and_nan() -> None:
     assert _python_scalar_to_sql_literal(float("inf")) is None
     assert _python_scalar_to_sql_literal(b"bytes") is None
     assert _python_scalar_to_sql_literal(math.pi) == str(math.pi)
+
+
+def test_implicit_autoincrement_single_integer_pk_is_true() -> None:
+    """Single integer PK with SA implicit autoincrement maps to autoincrement=True."""
+    from sqlalchemy import Column, Integer
+    from sqlalchemy.orm import DeclarativeBase
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Row(Base):
+        __tablename__ = "row_implicit_pk_auto"
+        id = Column(Integer, primary_key=True)
+
+    schema = ModelSchema.from_models(Row)
+    table_def = next(iter(schema.tables.values()))
+    assert table_def.column_by_name()["id"].autoincrement is True
+
+
+def test_implicit_autoincrement_disabled_when_pk_has_server_default() -> None:
+    """autoincrement='auto' should be false when a default generator already exists."""
+    from sqlalchemy import Column, Integer, text
+    from sqlalchemy.orm import DeclarativeBase
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Row(Base):
+        __tablename__ = "row_pk_server_default"
+        id = Column(Integer, primary_key=True, server_default=text("1"))
+
+    schema = ModelSchema.from_models(Row)
+    table_def = next(iter(schema.tables.values()))
+    assert table_def.column_by_name()["id"].autoincrement is False
+
+
+def test_implicit_autoincrement_false_for_non_integer_or_composite_pk() -> None:
+    """Only single integer PK may map to implicit autoincrement."""
+    from sqlalchemy import Column, String
+    from sqlalchemy.orm import DeclarativeBase
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class NonIntegerPk(Base):
+        __tablename__ = "non_integer_pk"
+        id = Column(String(32), primary_key=True)
+
+    class CompositePk(Base):
+        __tablename__ = "composite_pk"
+        a = Column(String(32), primary_key=True)
+        b = Column(String(32), primary_key=True)
+
+    non_integer_schema = ModelSchema.from_models(NonIntegerPk)
+    non_integer_table = next(iter(non_integer_schema.tables.values()))
+    assert non_integer_table.column_by_name()["id"].autoincrement is False
+
+    composite_schema = ModelSchema.from_models(CompositePk)
+    composite_table = next(iter(composite_schema.tables.values()))
+    assert composite_table.column_by_name()["a"].autoincrement is False
+    assert composite_table.column_by_name()["b"].autoincrement is False

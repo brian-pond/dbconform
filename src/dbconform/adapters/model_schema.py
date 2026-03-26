@@ -149,6 +149,45 @@ def _default_expr(column: Any, _dialect: Dialect | None) -> str | None:
     return None
 
 
+def _column_is_implicit_autoincrement_pk(
+    column: Any,
+    *,
+    is_single_pk: bool,
+    pk_col_name: str | None,
+    integer_type_names: tuple[str, ...],
+) -> bool:
+    """
+    Decide whether a column should be treated as autoincrement in internal schema.
+
+    Policy: dbconform prefers explicit SQLAlchemy/SQLModel model declarations, but we
+    intentionally support SQLAlchemy's documented implicit autoincrement behavior for
+    compatibility (single integer PK with ``autoincrement='auto'`` and no other default
+    generator). See docs/requirements/01-functional.md (Schema parity scope).
+    """
+    is_pk_col = pk_col_name is not None and column.name == pk_col_name
+    is_integer = type(column.type).__name__ in integer_type_names
+    if not (is_single_pk and is_pk_col and is_integer):
+        return False
+
+    sa_auto = getattr(column, "autoincrement", False)
+    if sa_auto is True:
+        return True
+    if sa_auto is False:
+        return False
+    if isinstance(sa_auto, str):
+        if sa_auto != "auto":
+            return False
+        # SQLAlchemy docs: implicit autoincrement applies only when no other
+        # default-generating construct is present.
+        has_other_default_generator = (
+            getattr(column, "default", None) is not None
+            or getattr(column, "server_default", None) is not None
+            or getattr(column, "identity", None) is not None
+        )
+        return not has_other_default_generator
+    return False
+
+
 def _extract_table_def(
     table: Table,
     target_schema: str | None,
@@ -167,12 +206,12 @@ def _extract_table_def(
         default = _default_expr(col, dialect)
         type_str = _column_type_str(col, dialect)
         comment = getattr(col, "comment", None)
-        sa_auto = getattr(col, "autoincrement", False)
-        if isinstance(sa_auto, str):
-            sa_auto = sa_auto == "auto"
-        is_pk_col = pk_col_name is not None and col.name == pk_col_name
-        is_integer = type(col.type).__name__ in _integer_type_names
-        autoincrement = bool(is_single_pk and is_pk_col and is_integer and sa_auto)
+        autoincrement = _column_is_implicit_autoincrement_pk(
+            col,
+            is_single_pk=bool(is_single_pk),
+            pk_col_name=pk_col_name,
+            integer_type_names=_integer_type_names,
+        )
         columns.append(
             ColumnDef(
                 name=col.name,

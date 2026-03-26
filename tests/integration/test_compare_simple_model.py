@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 from sqlmodel import Field, SQLModel
 
@@ -39,6 +40,19 @@ class BomDateDefaults(SQLModel, table=True):
     effective_from: date = Field(default=date(1900, 1, 1))
     effective_to: date = Field(default=date(9999, 12, 31))
     lot_tracking: bool = Field(default=False)
+
+
+class _ImplicitPkBase(DeclarativeBase):
+    """Declarative base for implicit-PK autoincrement regression model."""
+
+
+class ImplicitPkWidget(_ImplicitPkBase):
+    """Model using SQLAlchemy implicit autoincrement for single integer PK."""
+
+    __tablename__ = "implicit_pk_widget"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(nullable=False)
 
 
 def test_empty_sqlite_db_fixture(empty_sqlite_db: tuple[Path, str]) -> None:
@@ -335,6 +349,27 @@ def test_apply_changes_date_defaults_not_realtered_on_reapply(
     assert first.steps, "First apply_changes() should create the table."
 
     second = conform.apply_changes(BomDateDefaults)
+    assert not isinstance(second, dbconform.ConformError), str(second)
+    assert len(second.steps) == 0
+
+
+def test_apply_changes_implicit_integer_pk_autoincrement_stable_on_reapply(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """Implicit integer PK autoincrement should be supported and idempotent.
+
+    We prefer explicit SQLAlchemy/SQLModel declarations in user code, but dbconform
+    intentionally supports SQLAlchemy's documented implicit behavior for compatibility.
+    Traceability: docs/requirements/01-functional.md (Schema parity scope).
+    """
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+
+    first = conform.apply_changes(ImplicitPkWidget)
+    assert not isinstance(first, dbconform.ConformError), str(first)
+    assert first.steps, "First apply_changes() should create the table."
+
+    second = conform.apply_changes(ImplicitPkWidget)
     assert not isinstance(second, dbconform.ConformError), str(second)
     assert len(second.steps) == 0
 
