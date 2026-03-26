@@ -221,6 +221,31 @@ class PostgreSQLDialect(Dialect):
         tbl = self.qualified_table(table_name)
         return f"CREATE {uniq}INDEX {self._quote(index.name)} ON {tbl} ({cols})"
 
+    def _normalize_default_expr(self, default_expr: str | None) -> str | None:
+        """
+        Normalize reflected PostgreSQL default expressions for stable comparisons.
+
+        PostgreSQL reflection often returns typed literal defaults as casts, e.g.
+        ``'1900-01-01'::date``. Model-side defaults from SQLModel/SQLAlchemy Python
+        values are represented as ``'1900-01-01'``. These are semantically equal and
+        should not trigger repeated ALTER DEFAULT steps on re-apply.
+        """
+        if default_expr is None:
+            return None
+        expr = default_expr.strip()
+        while expr.startswith("(") and expr.endswith(")"):
+            expr = expr[1:-1].strip()
+        literal_cast = re.match(
+            r"^('(?:[^']|'')*')::(?:date|time(?:stamp)?(?:\s+with(?:out)?\s+time\s+zone)?)$",
+            expr,
+            re.IGNORECASE,
+        )
+        if literal_cast:
+            return literal_cast.group(1)
+        if re.match(r"^(true|false)$", expr, re.IGNORECASE):
+            return expr.upper()
+        return expr
+
     def normalize_reflected_table(self, table_def: TableDef) -> TableDef:
         """
         Normalize reflected table so it compares equal to model-side internal schema.
@@ -266,7 +291,7 @@ class PostgreSQLDialect(Dialect):
                         name=col.name,
                         data_type_name=neutral_type,
                         nullable=col.nullable,
-                        default=col.default,
+                        default=self._normalize_default_expr(col.default),
                         comment=col.comment,
                         autoincrement=False,
                     )

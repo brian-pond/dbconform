@@ -7,7 +7,7 @@ Database connection, compare() / apply_changes(). Acceptance: schema (create tab
 """
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -28,6 +28,17 @@ class AuditLogWithNowDefault(SQLModel, table=True):
     occurred_at: datetime = Field(
         sa_column_kwargs={"server_default": func.now(), "nullable": False},
     )
+
+
+class BomDateDefaults(SQLModel, table=True):
+    """Regression model: DATE/BOOLEAN defaults should not re-trigger ALTER."""
+
+    __tablename__ = "bom_date_defaults"
+
+    id: int | None = Field(default=None, primary_key=True)
+    effective_from: date = Field(default=date(1900, 1, 1))
+    effective_to: date = Field(default=date(9999, 12, 31))
+    lot_tracking: bool = Field(default=False)
 
 
 def test_empty_sqlite_db_fixture(empty_sqlite_db: tuple[Path, str]) -> None:
@@ -305,6 +316,25 @@ def test_apply_changes_unique_constraint_not_readded_on_reapply(
 
     # Second apply: schema should already match model; no steps should be needed.
     second = conform.apply_changes(Habitat)
+    assert not isinstance(second, dbconform.ConformError), str(second)
+    assert len(second.steps) == 0
+
+
+def test_apply_changes_date_defaults_not_realtered_on_reapply(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """DATE defaults are idempotent across immediate re-apply for all supported backends.
+
+    Traceability: docs/requirements/01-functional.md (Schema parity scope, columns/defaults).
+    """
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+
+    first = conform.apply_changes(BomDateDefaults)
+    assert not isinstance(first, dbconform.ConformError), str(first)
+    assert first.steps, "First apply_changes() should create the table."
+
+    second = conform.apply_changes(BomDateDefaults)
     assert not isinstance(second, dbconform.ConformError), str(second)
     assert len(second.steps) == 0
 

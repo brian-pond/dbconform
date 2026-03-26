@@ -119,3 +119,14 @@ def test_postgresql_to_ddl_type_plain() -> None:
     col = ColumnDef("name", "VARCHAR(255)", nullable=False)
     assert dialect.to_ddl_type(col) == "VARCHAR(255)"
     assert dialect.to_ddl_type(col, pk_autoincrement=False) == "VARCHAR(255)"
+
+
+def test_postgresql_normalize_reflected_table_normalizes_bool_default_case() -> None:
+    """Reflected bool default case should normalize to model-side literal format."""
+    dialect = PostgreSQLDialect()
+    table = TableDef(
+        name=QualifiedName("public", "bom"),
+        columns=(ColumnDef("lot_tracking", "BOOLEAN", nullable=False, default="false"),),
+    )
+    normalized = dialect.normalize_reflected_table(table)
+    assert normalized.columns[0].default == "FALSE"
