@@ -82,13 +82,16 @@ pip install dbconform[async,postgres]  # Both
 from sqlalchemy import Column, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import DeclarativeBase
 
-class Product(DeclarativeBase):
+class Base(DeclarativeBase):
+    pass
+
+class Product(Base):
     __tablename__ = "product"
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
     price = Column(Float, nullable=False)
 
-class Cart(DeclarativeBase):
+class Cart(Base):
     __tablename__ = "cart"
     id = Column(Integer, primary_key=True, autoincrement=True)
     product_id = Column(Integer, ForeignKey("product.id"), nullable=False)
