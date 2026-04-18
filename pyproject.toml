@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbconform"
-version = "1.0.0"
+version = "1.0.1"
 description = "Synchronize database schema to models — document-driven project."
 readme = "README.md"
 license = { text = "MIT" }
@@ -63,7 +63,7 @@ where = ["src"]
 dbconform = "dbconform.cli:main"
 
 [tool.commitizen]
-version = "1.0.0"
+version = "1.0.1"
 version_scheme = "semver"
 commit = true
 tag = true
