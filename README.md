@@ -106,7 +106,7 @@ class Cart(Base):
 from dbconform import DbConform, ConformError
 
 conform = DbConform(credentials={"url": "sqlite:///./mydb.sqlite"})
-result = conform.compare([Product, Cart])
+result = conform.compare([Product, Cart])  # ConformPlan | ConformError
 
 if isinstance(result, ConformError):
     print("Compare failed:", result.messages)
@@ -125,7 +125,7 @@ else:
 ### Apply changes
 
 ```python
-result = conform.apply_changes([Product, Cart])
+result = conform.apply_changes([Product, Cart])  # ConformPlan | ConformError
 
 if isinstance(result, ConformError):
     print("Apply failed:", result.messages)
