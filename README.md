@@ -34,11 +34,11 @@ Alembic is excellent when you start clean -and- stay disciplined. But that's jus
 | Capability | SQLAlchemy `create_all` | Alembic | Atlas | **dbconform** |
 |---|:---:|:---:|:---:|:---:|
 | Create new tables | ✅ | ✅ | ✅ | ✅ |
-| Alter existing columns | ❌ | ✅ | ✅ | ✅ |
+| Alter existing tables | ❌ | ✅ | ✅ | ✅ |
 | Can fix schema drift | ❌ | ❌ | ✅ | ✅ |
 | Works without migration history | ✅ | ❌ | ❌ | ✅ |
 | Pure Python, `pip install` | ✅ | ✅ | ❌ | ✅ |
-| SQLite constraint rebuild | ❌ | ❌ | ❌ | ✅ |
+| SQLite rebuild capabilities | ❌ | ❌ | ❌ | ✅ |
 | Safe defaults (no accidental drops) | ✅ | ⚠️ | ⚠️ | ✅ |
 | In-process, programmatic | ✅ | ✅ | ❌ | ✅ |
 
