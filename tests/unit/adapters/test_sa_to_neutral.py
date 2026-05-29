@@ -50,3 +50,29 @@ def test_sa_column_boolean() -> None:
     """Boolean maps to BOOLEAN."""
     col = Column("flag", sa_types.Boolean())
     assert sa_column_to_neutral_type(col) == "BOOLEAN"
+
+
+def test_sa_column_jsonb() -> None:
+    """JSONB maps to neutral JSONB (GitHub #4)."""
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    col = Column("headers", JSONB())
+    assert sa_column_to_neutral_type(col) == "JSONB"
+
+
+def test_sa_column_json() -> None:
+    """JSON maps to neutral JSON, distinct from JSONB."""
+    col = Column("data", sa_types.JSON())
+    assert sa_column_to_neutral_type(col) == "JSON"
+
+
+def test_sa_column_datetime_timezone_aware() -> None:
+    """DateTime(timezone=True) maps to TIMESTAMPTZ (GitHub #5)."""
+    col = Column("created_at", sa_types.DateTime(timezone=True))
+    assert sa_column_to_neutral_type(col) == "TIMESTAMPTZ"
+
+
+def test_sa_column_datetime_naive() -> None:
+    """DateTime(timezone=False) maps to TIMESTAMP."""
+    col = Column("created_at", sa_types.DateTime(timezone=False))
+    assert sa_column_to_neutral_type(col) == "TIMESTAMP"

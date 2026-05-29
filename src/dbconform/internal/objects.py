@@ -113,11 +113,18 @@ class CheckDef:
 
 @dataclass(frozen=True, slots=True)
 class IndexDef:
-    """Index: name + columns + unique flag."""
+    """
+    Index: name, columns, optional expressions, partial predicate, unique flag.
+
+    column_exprs holds DDL fragments (e.g. ``priority DESC``); when empty,
+    column_names are quoted for CREATE INDEX. See GitHub #6.
+    """
 
     name: str
     column_names: tuple[str, ...]
     unique: bool = False
+    column_exprs: tuple[str, ...] = ()
+    where: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

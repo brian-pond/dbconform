@@ -15,6 +15,7 @@ from dbconform.internal.objects import (
     TableDef,
     UniqueDef,
 )
+from dbconform.internal.types import CanonicalType
 from dbconform.sql_dialect.base import Dialect
 
 
@@ -42,6 +43,16 @@ class SQLiteDialect(Dialect):
             return default_expr.strip().upper()
         return default_expr
 
+    def to_ddl_type(self, column: ColumnDef, *, pk_autoincrement: bool = False) -> str:
+        """SQLite: map neutral types without SQLite equivalents to closest supported types."""
+        _ = pk_autoincrement
+        type_upper = column.data_type_name.strip().upper()
+        if type_upper == CanonicalType.JSONB:
+            return "JSON"
+        if type_upper == CanonicalType.TIMESTAMPTZ:
+            return "TEXT"
+        return column.data_type_name
+
     def create_table_sql(self, table: TableDef) -> str:
         """Generate CREATE TABLE with columns and table-level constraints."""
         parts: list[str] = []
@@ -51,7 +62,8 @@ class SQLiteDialect(Dialect):
             and any(c.autoincrement and c.name in table.primary_key.column_names for c in table.columns)
         )
         for col in table.columns:
-            seg = f"{self._quote(col.name)} {col.data_type_name}"
+            ddl_type = self.to_ddl_type(col)
+            seg = f"{self._quote(col.name)} {ddl_type}"
             if not col.nullable:
                 seg += " NOT NULL"
             if col.default is not None:
@@ -81,7 +93,8 @@ class SQLiteDialect(Dialect):
 
     def add_column_sql(self, table_name: QualifiedName, column: ColumnDef) -> str:
         """SQLite supports ALTER TABLE ... ADD COLUMN."""
-        seg = f"{self._quote(column.name)} {column.data_type_name}"
+        ddl_type = self.to_ddl_type(column)
+        seg = f"{self._quote(column.name)} {ddl_type}"
         if not column.nullable:
             seg += " NOT NULL"
         if column.default is not None:

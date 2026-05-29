@@ -52,3 +52,21 @@ def test_sqlite_create_table_with_now_default_emits_current_timestamp() -> None:
     sql = dialect.create_table_sql(table)
     assert "DEFAULT CURRENT_TIMESTAMP" in sql
     assert "now()" not in sql
+
+
+def test_sqlite_to_ddl_type_jsonb_and_timestamptz() -> None:
+    """SQLite maps JSONB→JSON and TIMESTAMPTZ→TEXT for DDL."""
+    dialect = SQLiteDialect()
+    assert dialect.to_ddl_type(ColumnDef("h", "JSONB", nullable=False)) == "JSON"
+    assert dialect.to_ddl_type(ColumnDef("t", "TIMESTAMPTZ", nullable=False)) == "TEXT"
+    table = TableDef(
+        name=QualifiedName(None, "events"),
+        columns=(
+            ColumnDef("id", "INTEGER", nullable=False),
+            ColumnDef("payload", "JSONB", nullable=False),
+            ColumnDef("at", "TIMESTAMPTZ", nullable=False),
+        ),
+    )
+    sql = dialect.create_table_sql(table)
+    assert '"payload" JSON NOT NULL' in sql
+    assert '"at" TEXT NOT NULL' in sql

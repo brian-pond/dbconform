@@ -18,6 +18,8 @@ def test_canonical_type_enum() -> None:
     assert CanonicalType.BIGINT == "BIGINT"
     assert CanonicalType.TEXT == "TEXT"
     assert CanonicalType.TIMESTAMP == "TIMESTAMP"
+    assert CanonicalType.TIMESTAMPTZ == "TIMESTAMPTZ"
+    assert CanonicalType.JSONB == "JSONB"
 
 
 def test_canonical_varchar() -> None:

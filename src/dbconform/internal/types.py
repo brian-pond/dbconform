@@ -33,8 +33,10 @@ class CanonicalType(StrEnum):
     CHAR = "CHAR"
     DATE = "DATE"
     TIMESTAMP = "TIMESTAMP"
+    TIMESTAMPTZ = "TIMESTAMPTZ"
     BLOB = "BLOB"
     JSON = "JSON"
+    JSONB = "JSONB"
     NUMERIC = "NUMERIC"
 
 

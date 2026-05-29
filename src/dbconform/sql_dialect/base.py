@@ -136,16 +136,32 @@ class Dialect(ABC):
         tbl = self.qualified_table(table_name)
         return f"ALTER TABLE {tbl} ADD {name_part}CHECK ({check.expression})"
 
+    def _format_index_expr(self, expr: str) -> str:
+        """Format one index column expression for CREATE INDEX DDL."""
+        expr = expr.strip()
+        sort_match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s+(ASC|DESC)$", expr, re.IGNORECASE)
+        if sort_match:
+            return f"{self._quote(sort_match.group(1))} {sort_match.group(2).upper()}"
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", expr):
+            return self._quote(expr)
+        return expr
+
     def create_index_sql(
         self,
         index: IndexDef,
         table_name: QualifiedName,
     ) -> str:
-        """Generate CREATE [UNIQUE] INDEX."""
+        """Generate CREATE [UNIQUE] INDEX, including partial predicates when set."""
         uniq = "UNIQUE " if index.unique else ""
-        cols = ", ".join(self._quote(c) for c in index.column_names)
+        if index.column_exprs:
+            cols = ", ".join(self._format_index_expr(e) for e in index.column_exprs)
+        else:
+            cols = ", ".join(self._quote(c) for c in index.column_names)
         tbl = self.qualified_table(table_name)
-        return f"CREATE {uniq}INDEX {self._quote(index.name)} ON {tbl} ({cols})"
+        sql = f"CREATE {uniq}INDEX {self._quote(index.name)} ON {tbl} ({cols})"
+        if index.where:
+            sql += f" WHERE {index.where}"
+        return sql
 
     def drop_table_sql(self, table_name: QualifiedName) -> str:
         """Generate DROP TABLE. Used when allow_drop_extra_tables=True (01-functional: Opt-in flags)."""

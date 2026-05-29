@@ -45,7 +45,9 @@ def sa_column_to_neutral_type(column: Any) -> str:
         return CanonicalType.TEXT
     if name in ("Date", "DATE", "Date"):
         return CanonicalType.DATE
-    if name in ("DateTime", "DATETIME", "TIMESTAMP", "DateTime", "Timestamp"):
+    if name in ("DateTime", "DATETIME", "TIMESTAMP", "Timestamp"):
+        if getattr(typ, "timezone", False):
+            return CanonicalType.TIMESTAMPTZ
         return CanonicalType.TIMESTAMP
     if name in ("Numeric", "NUMERIC", "Decimal", "DECIMAL"):
         precision = getattr(typ, "precision", None)
@@ -60,7 +62,9 @@ def sa_column_to_neutral_type(column: Any) -> str:
         return canonical_varchar(255)  # common default when no length
     if name in ("LargeBinary", "BLOB", "BYTEA"):
         return CanonicalType.BLOB
-    if name in ("JSON", "JSONB"):
+    if name == "JSONB":
+        return CanonicalType.JSONB
+    if name == "JSON":
         return CanonicalType.JSON
 
     # Fallback: try compile with a generic dialect to get a string, then normalize

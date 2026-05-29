@@ -24,10 +24,19 @@ from enum import Enum
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import Table
+from sqlalchemy import Column, Table
 from sqlalchemy.engine import Dialect
-from sqlalchemy.schema import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
-from sqlalchemy.sql.elements import ClauseElement
+from sqlalchemy.schema import (
+    CheckConstraint,
+    ForeignKeyConstraint,
+    Identity,
+    UniqueConstraint,
+)
+from sqlalchemy.schema import (
+    Sequence as SaSequence,
+)
+from sqlalchemy.sql.elements import ClauseElement, TextClause, UnaryExpression
+from sqlalchemy.sql.operators import asc_op, desc_op
 
 from dbconform.adapters.sa_to_neutral import sa_column_to_neutral_type
 from dbconform.internal.objects import (
@@ -149,6 +158,97 @@ def _default_expr(column: Any, _dialect: Dialect | None) -> str | None:
     return None
 
 
+def _has_real_default_generator(column: Any) -> bool:
+    """
+    Return True when the column has a default generator that blocks implicit autoincrement.
+
+    SQLAlchemy treats server defaults, Identity, Sequence, and non-empty Python-side defaults
+    as generators. Empty ``ColumnDefault(None)`` placeholders (common on SQLModel PK fields
+    with ``Field(default=None)``) are ignored. See GitHub #2.
+    """
+    server_default = getattr(column, "server_default", None)
+    if server_default is not None:
+        return True
+
+    default = getattr(column, "default", None)
+    if default is None:
+        return False
+    if isinstance(default, SaSequence):
+        return True
+
+    if hasattr(default, "arg"):
+        arg = default.arg
+        if isinstance(arg, SaSequence):
+            return True
+        if callable(arg):
+            return True
+        if isinstance(arg, ClauseElement):
+            return True
+        return arg is not None
+
+    return hasattr(default, "text") and default.text is not None
+
+
+def _index_expression_to_str(expr: Any) -> tuple[str, str | None]:
+    """
+    Convert one SQLAlchemy index expression to a DDL fragment and optional column name.
+
+    Returns (ddl_fragment, column_name). column_name is None for ``text()`` expressions.
+    """
+    if isinstance(expr, str):
+        return expr, expr
+    if isinstance(expr, Column):
+        return expr.name, expr.name
+    if isinstance(expr, TextClause):
+        return str(expr), None
+    if isinstance(expr, UnaryExpression):
+        inner = expr.element
+        if isinstance(inner, Column):
+            col_name = inner.name
+            if expr.modifier is desc_op:
+                return f"{col_name} DESC", col_name
+            if expr.modifier is asc_op:
+                return f"{col_name} ASC", col_name
+        return str(expr), None
+    if hasattr(expr, "name"):
+        name = expr.name
+        return name, name
+    return str(expr), None
+
+
+def _index_where_clause(idx: Any) -> str | None:
+    """Extract partial-index WHERE predicate from a SQLAlchemy Index."""
+    where = idx.dialect_kwargs.get("postgresql_where")
+    if where is None:
+        where = idx.dialect_kwargs.get("sqlite_where")
+    if where is None:
+        return None
+    return str(where)
+
+
+def _index_to_def(idx: Any, table: Table) -> IndexDef:
+    """
+    Build IndexDef from a SQLAlchemy Index, preserving sort order and partial predicates.
+
+    See docs/requirements/01-functional.md (Schema parity scope — indexes); GitHub #6.
+    """
+    column_exprs: list[str] = []
+    column_names: list[str] = []
+    for expr in idx.expressions:
+        ddl_frag, col_name = _index_expression_to_str(expr)
+        column_exprs.append(ddl_frag)
+        if col_name is not None:
+            column_names.append(col_name)
+
+    return IndexDef(
+        name=idx.name or f"ix_{table.name}_{'_'.join(column_names)}",
+        column_names=tuple(column_names),
+        unique=idx.unique or False,
+        column_exprs=tuple(column_exprs),
+        where=_index_where_clause(idx),
+    )
+
+
 def _column_is_implicit_autoincrement_pk(
     column: Any,
     *,
@@ -169,6 +269,10 @@ def _column_is_implicit_autoincrement_pk(
     if not (is_single_pk and is_pk_col and is_integer):
         return False
 
+    identity = getattr(column, "identity", None)
+    if isinstance(identity, Identity):
+        return True
+
     sa_auto = getattr(column, "autoincrement", False)
     if sa_auto is True:
         return True
@@ -179,12 +283,7 @@ def _column_is_implicit_autoincrement_pk(
             return False
         # SQLAlchemy docs: implicit autoincrement applies only when no other
         # default-generating construct is present.
-        has_other_default_generator = (
-            getattr(column, "default", None) is not None
-            or getattr(column, "server_default", None) is not None
-            or getattr(column, "identity", None) is not None
-        )
-        return not has_other_default_generator
+        return not _has_real_default_generator(column)
     return False
 
 
@@ -259,13 +358,7 @@ def _extract_table_def(
 
     indexes: list[IndexDef] = []
     for idx in table.indexes:
-        indexes.append(
-            IndexDef(
-                name=idx.name or f"ix_{table.name}_{'_'.join(c.name for c in idx.columns)}",
-                column_names=tuple(c.name for c in idx.columns),
-                unique=idx.unique or False,
-            )
-        )
+        indexes.append(_index_to_def(idx, table))
 
     comment = getattr(table, "comment", None)
 

@@ -67,6 +67,8 @@ Column types are represented in the internal schema as **data_type_name** (a str
 
 1. **Model → internal**: SQLAlchemy column types are compiled with the connection dialect (`column.type.compile(dialect)`), producing a type string. Optionally, a schema normalizer (dbconform Dialect) rewrites the table so type strings match a neutral form (e.g. PostgreSQL: `CHARACTER VARYING(255)` → `VARCHAR(255)`, `DOUBLE PRECISION` → `FLOAT`).
 2. **Reflection → internal**: Reflected tables are built from DB metadata (same compile); then the backend’s Dialect **normalize_reflected_table** and **to_neutral_type** rewrite columns so they use the same neutral type strings (e.g. SERIAL/nextval → `default=None`, `autoincrement=True`, neutral type string).
-3. **Neutral → DDL**: When generating SQL, each Dialect maps **data_type_name** to platform-specific DDL (e.g. SQLite uses data_type_name as-is; PostgreSQL maps INTEGER + autoincrement PK → SERIAL). Shared parsing (e.g. VARCHAR length) lives on the base Dialect (`_parse_varchar_length`).
+3. **Neutral → DDL**: When generating SQL, each Dialect maps **data_type_name** to platform-specific DDL (e.g. SQLite maps `JSONB` → `JSON`; PostgreSQL maps INTEGER + autoincrement PK → SERIAL, `BLOB` → `BYTEA`, `JSONB` → `JSONB`, `TIMESTAMPTZ` → `TIMESTAMPTZ`). Shared parsing (e.g. VARCHAR length) lives on the base Dialect (`_parse_varchar_length`).
+
+Neutral vocabulary includes distinct types where backends differ: e.g. `JSON` vs `JSONB`, `TIMESTAMP` vs `TIMESTAMPTZ`, and `BLOB` (binary) mapped per dialect.
 
 A single neutral type set and per-dialect “to neutral” / “to DDL” mapping keeps comparison and DDL generation consistent and makes adding a new backend (e.g. MariaDB) a matter of implementing one Dialect.

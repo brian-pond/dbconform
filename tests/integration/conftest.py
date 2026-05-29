@@ -129,6 +129,23 @@ def empty_postgres_db() -> tuple[str, str]:
         engine_teardown.dispose()
 
 
+@pytest.fixture
+def postgres_broker_schema_db(empty_postgres_db: tuple[str, str]) -> tuple[str, str]:
+    """
+    PostgreSQL test DB with a dedicated ``broker`` schema (non-public).
+
+    Yields (url, target_schema) where target_schema is ``broker``.
+    See GitHub #8 (schema-qualified table compare).
+    """
+    url, _schema = empty_postgres_db
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+        conn.execute(text('CREATE SCHEMA IF NOT EXISTS "broker"'))
+    engine.dispose()
+    yield (url, "broker")
+
+
 @pytest.fixture(params=["sqlite", "postgres"])
 def empty_db(request: pytest.FixtureRequest) -> tuple[str, str | None]:
     """

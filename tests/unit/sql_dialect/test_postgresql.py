@@ -121,6 +121,51 @@ def test_postgresql_to_ddl_type_plain() -> None:
     assert dialect.to_ddl_type(col, pk_autoincrement=False) == "VARCHAR(255)"
 
 
+def test_postgresql_to_ddl_type_bytea() -> None:
+    """Neutral BLOB maps to PostgreSQL BYTEA in DDL (GitHub #3)."""
+    dialect = PostgreSQLDialect()
+    col = ColumnDef("payload", "BLOB", nullable=False)
+    assert dialect.to_ddl_type(col) == "BYTEA"
+    table = TableDef(
+        name=QualifiedName("public", "broker_message"),
+        columns=(
+            ColumnDef("message_id", "VARCHAR(255)", nullable=False),
+            ColumnDef("payload", "BLOB", nullable=False),
+        ),
+        primary_key=PrimaryKeyDef(("message_id",)),
+    )
+    sql = dialect.create_table_sql(table)
+    assert '"payload" BYTEA NOT NULL' in sql
+    assert "BLOB" not in sql
+
+
+def test_postgresql_to_neutral_type_bytea() -> None:
+    """Reflected BYTEA normalizes to neutral BLOB for compare (GitHub #7)."""
+    dialect = PostgreSQLDialect()
+    assert dialect.to_neutral_type("BYTEA") == "BLOB"
+    assert dialect.to_neutral_type("bytea") == "BLOB"
+
+
+def test_postgresql_to_neutral_type_jsonb_and_timestamptz() -> None:
+    """Reflected JSONB and TIMESTAMPTZ normalize to neutral types (GitHub #4, #5)."""
+    dialect = PostgreSQLDialect()
+    assert dialect.to_neutral_type("JSONB") == "JSONB"
+    assert dialect.to_neutral_type("TIMESTAMPTZ") == "TIMESTAMPTZ"
+    assert dialect.to_neutral_type("TIMESTAMP WITH TIME ZONE") == "TIMESTAMPTZ"
+    assert dialect.to_neutral_type("TIMESTAMP WITHOUT TIME ZONE") == "TIMESTAMP"
+
+
+def test_postgresql_to_ddl_type_jsonb_and_timestamptz() -> None:
+    """Neutral JSONB and TIMESTAMPTZ map to PostgreSQL DDL (GitHub #4, #5)."""
+    dialect = PostgreSQLDialect()
+    jsonb_col = ColumnDef("headers", "JSONB", nullable=False)
+    tz_col = ColumnDef("created_at", "TIMESTAMPTZ", nullable=False)
+    json_col = ColumnDef("data", "JSON", nullable=False)
+    assert dialect.to_ddl_type(jsonb_col) == "JSONB"
+    assert dialect.to_ddl_type(tz_col) == "TIMESTAMPTZ"
+    assert dialect.to_ddl_type(json_col) == "JSON"
+
+
 def test_postgresql_normalize_reflected_table_normalizes_bool_default_case() -> None:
     """Reflected bool default case should normalize to model-side literal format."""
     dialect = PostgreSQLDialect()

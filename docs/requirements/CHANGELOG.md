@@ -5,6 +5,11 @@ All notable changes to the requirements docs are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **PostgreSQL BLOB/BYTEA:** Neutral `BLOB` now maps to `BYTEA` in PostgreSQL DDL; reflected `BYTEA` normalizes to neutral `BLOB` for stable compare. Fixes apply failure `type "blob" does not exist` (GitHub #3, #7).
+- **SQLModel implicit autoincrement:** Single integer PK with `Field(default=None, primary_key=True)` and empty `ColumnDefault(None)` placeholders no longer block implicit autoincrement; explicit `Identity()` maps to autoincrement (GitHub #2).
+- **PostgreSQL JSONB and TIMESTAMPTZ:** Neutral `JSONB` and `TIMESTAMPTZ` types preserve SQLAlchemy `JSONB` and `DateTime(timezone=True)` fidelity in PostgreSQL DDL and compare; plain `JSON` and naive `TIMESTAMP` remain distinct (GitHub #4, #5).
+- **Partial indexes:** Index extraction and DDL now preserve `postgresql_where` partial predicates, `text()` expressions, and column sort order (`DESC`/`ASC`) in `CREATE INDEX` (GitHub #6).
+- **Non-public schema compare:** Verified compare detects existing tables in non-`public` PostgreSQL schemas when `target_schema` matches; spurious `CreateTableStep` in issue #8 was likely caused by type/index drift now fixed (GitHub #8).
 - **Model → DDL column defaults:** Python scalars on SQLAlchemy/SQLModel columns (e.g. `Field(default=date(1970, 1, 1))` on `DATE`) were emitted as `DEFAULT 1970-01-01`, which PostgreSQL parses as integer subtraction, not a date literal, causing datatype errors. dbconform now emits proper quoted literals for common scalar types and keeps `str(default.arg)` only for SQLAlchemy `ClauseElement` args (e.g. `server_default=text(...)`). See docs/technical/05-model-column-defaults.md.
 
 ### Added

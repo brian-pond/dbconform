@@ -55,6 +55,16 @@ class ImplicitPkWidget(_ImplicitPkBase):
     name: Mapped[str] = mapped_column(nullable=False)
 
 
+class ProductSupplier(SQLModel, table=True):
+    """SQLModel regression for implicit integer PK autoincrement (GitHub #2)."""
+
+    __tablename__ = "product_supplier"
+
+    id: int | None = Field(default=None, primary_key=True)
+    product_id: str = Field(min_length=1, index=True)
+    supplier_id: str = Field(min_length=1, index=True)
+
+
 def test_empty_sqlite_db_fixture(empty_sqlite_db: tuple[Path, str]) -> None:
     """Use empty_sqlite_db fixture: DB exists, is writable, and can have tables created."""
     path, url = empty_sqlite_db
@@ -370,6 +380,22 @@ def test_apply_changes_implicit_integer_pk_autoincrement_stable_on_reapply(
     assert first.steps, "First apply_changes() should create the table."
 
     second = conform.apply_changes(ImplicitPkWidget)
+    assert not isinstance(second, dbconform.ConformError), str(second)
+    assert len(second.steps) == 0
+
+
+def test_apply_changes_sqlmodel_implicit_pk_autoincrement_stable_on_reapply(
+    empty_db: tuple[str, str | None],
+) -> None:
+    """SQLModel Field(default=None, primary_key=True) autoincrement is idempotent (GitHub #2)."""
+    url, target_schema = empty_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=target_schema)
+
+    first = conform.apply_changes(ProductSupplier)
+    assert not isinstance(first, dbconform.ConformError), str(first)
+    assert first.steps, "First apply_changes() should create the table."
+
+    second = conform.apply_changes(ProductSupplier)
     assert not isinstance(second, dbconform.ConformError), str(second)
     assert len(second.steps) == 0
 

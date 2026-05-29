@@ -48,15 +48,30 @@ class PostgreSQLDialect(Dialect):
         m = re.match(r"VARCHAR\s*\(\s*(\d+)\s*\)", t, re.IGNORECASE)
         if m:
             return f"VARCHAR({m.group(1)})"
+        if u == "BYTEA":
+            return CanonicalType.BLOB
+        if u == "JSONB":
+            return CanonicalType.JSONB
+        if u in ("TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ"):
+            return CanonicalType.TIMESTAMPTZ
+        if u == "TIMESTAMP WITHOUT TIME ZONE":
+            return CanonicalType.TIMESTAMP
         return t
 
     def to_ddl_type(self, column: ColumnDef, *, pk_autoincrement: bool = False) -> str:
-        """PostgreSQL: SERIAL/BIGSERIAL for autoincrement PK; else column.data_type_name."""
+        """PostgreSQL: SERIAL/BIGSERIAL for autoincrement PK; map neutral types to PG DDL."""
         if pk_autoincrement and column.autoincrement:
             type_upper = column.data_type_name.strip().upper()
             if type_upper in ("BIGINT", "INT8"):
                 return "BIGSERIAL"
             return "SERIAL"
+        type_upper = column.data_type_name.strip().upper()
+        if type_upper == CanonicalType.BLOB:
+            return "BYTEA"
+        if type_upper == CanonicalType.JSONB:
+            return "JSONB"
+        if type_upper == CanonicalType.TIMESTAMPTZ:
+            return "TIMESTAMPTZ"
         return column.data_type_name
 
     def create_table_sql(self, table: TableDef) -> str:
@@ -210,16 +225,29 @@ class PostgreSQLDialect(Dialect):
             return f"DROP INDEX IF EXISTS {schema_q}.{idx_q}"
         return f"DROP INDEX IF EXISTS {self._quote(index_name)}"
 
-    def create_index_sql(
-        self,
-        index: IndexDef,
-        table_name: QualifiedName,
-    ) -> str:
-        """Generate CREATE [UNIQUE] INDEX for PostgreSQL."""
-        uniq = "UNIQUE " if index.unique else ""
-        cols = ", ".join(self._quote(c) for c in index.column_names)
-        tbl = self.qualified_table(table_name)
-        return f"CREATE {uniq}INDEX {self._quote(index.name)} ON {tbl} ({cols})"
+    def _normalize_index_where(self, where: str) -> str:
+        """Normalize partial-index predicate whitespace for stable compare."""
+        return " ".join(where.split()).strip()
+
+    def _normalize_index_expr(self, expr: str) -> str:
+        """Normalize one index column expression for stable compare."""
+        expr = " ".join(expr.split()).strip()
+        sort_match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s+(ASC|DESC)$", expr, re.IGNORECASE)
+        if sort_match:
+            return f"{sort_match.group(1)} {sort_match.group(2).upper()}"
+        return expr
+
+    def _normalize_index_def(self, index: IndexDef) -> IndexDef:
+        """Normalize reflected index for stable comparison with model-side IndexDef."""
+        column_exprs = tuple(self._normalize_index_expr(e) for e in index.column_exprs)
+        where = self._normalize_index_where(index.where) if index.where else None
+        return IndexDef(
+            name=index.name,
+            column_names=index.column_names,
+            unique=index.unique,
+            column_exprs=column_exprs,
+            where=where,
+        )
 
     def _normalize_default_expr(self, default_expr: str | None) -> str | None:
         """
@@ -310,6 +338,8 @@ class PostgreSQLDialect(Dialect):
                     name = None
             new_uniques.append(UniqueDef(name=name, column_names=u.column_names))
 
+        new_indexes = tuple(self._normalize_index_def(i) for i in table_def.indexes)
+
         return TableDef(
             name=table_def.name,
             columns=tuple(new_columns),
@@ -317,7 +347,7 @@ class PostgreSQLDialect(Dialect):
             unique_constraints=tuple(new_uniques),
             foreign_keys=table_def.foreign_keys,
             check_constraints=table_def.check_constraints,
-            indexes=table_def.indexes,
+            indexes=new_indexes,
             comment=table_def.comment,
         )
 

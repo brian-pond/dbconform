@@ -298,3 +298,58 @@ def test_implicit_autoincrement_false_for_non_integer_or_composite_pk() -> None:
     composite_table = next(iter(composite_schema.tables.values()))
     assert composite_table.column_by_name()["a"].autoincrement is False
     assert composite_table.column_by_name()["b"].autoincrement is False
+
+
+def test_sqlmodel_implicit_autoincrement_pk_is_true() -> None:
+    """SQLModel Field(default=None, primary_key=True) maps to autoincrement=True (GitHub #2)."""
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class ProductSupplier(SQLModel, table=True):
+        __tablename__ = "product_supplier_implicit_pk"
+        id: int | None = Field(default=None, primary_key=True)
+        supplier_id: str = Field(min_length=1)
+
+    schema = ModelSchema.from_models(ProductSupplier)
+    table_def = next(iter(schema.tables.values()))
+    assert table_def.column_by_name()["id"].autoincrement is True
+
+
+def test_column_default_none_placeholder_still_autoincrements() -> None:
+    """Empty ColumnDefault(None) on PK must not block implicit autoincrement (GitHub #2)."""
+    from sqlalchemy import Column, Integer
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.schema import ColumnDefault
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Row(Base):
+        __tablename__ = "row_default_none_placeholder"
+        id = Column(Integer, primary_key=True)
+        id.default = ColumnDefault(None)
+
+    schema = ModelSchema.from_models(Row)
+    table_def = next(iter(schema.tables.values()))
+    assert table_def.column_by_name()["id"].autoincrement is True
+
+
+def test_explicit_identity_pk_is_autoincrement() -> None:
+    """Explicit SQLAlchemy Identity() on integer PK maps to autoincrement=True."""
+    from sqlalchemy import Column, Integer
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.schema import Identity
+
+    from dbconform.adapters.model_schema import ModelSchema
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Row(Base):
+        __tablename__ = "row_explicit_identity"
+        id = Column(Integer, Identity(), primary_key=True)
+
+    schema = ModelSchema.from_models(Row)
+    table_def = next(iter(schema.tables.values()))
+    assert table_def.column_by_name()["id"].autoincrement is True
