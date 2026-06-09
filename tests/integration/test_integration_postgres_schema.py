@@ -1,15 +1,15 @@
 """
 Integration tests: non-public PostgreSQL schema table detection on compare.
 
-Traceability: docs/requirements/01-functional.md (Target schema); GitHub #8.
+Traceability: docs/requirements/01-functional.md (Target schema); GitHub #8, #9.
 """
 
 import pytest
-from sqlalchemy import Column, Integer, String, create_engine
+from sqlalchemy import Column, Enum, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase
 
 import dbconform
-from dbconform.plan import CreateTableStep
+from dbconform.plan import AlterTableStep, CreateTableStep
 
 
 class _Base(DeclarativeBase):
@@ -58,3 +58,72 @@ async def test_async_compare_detects_existing_broker_schema_table(
     assert not isinstance(plan, dbconform.ConformError)
     create_steps = [s for s in plan.steps if isinstance(s, CreateTableStep)]
     assert create_steps == [], f"Unexpected create-table steps: {create_steps}"
+
+
+class _EnumCheckBase(DeclarativeBase):
+    """Declarative base for Enum CHECK constraint round-trip tests (GitHub #9)."""
+
+
+class NotificationOutbox(_EnumCheckBase):
+    """SQLAlchemy non-native enum with named CHECK constraint."""
+
+    __tablename__ = "notification_outbox"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(String(36), primary_key=True)
+    status = Column(
+        Enum(
+            "pending",
+            "sent",
+            "failed",
+            name="outboxstatus",
+            native_enum=False,
+            create_constraint=True,
+        ),
+        nullable=False,
+    )
+
+
+def test_compare_enum_check_constraint_no_drift_on_recompare(
+    empty_postgres_db: tuple[str, str],
+) -> None:
+    """Second compare against unchanged Enum CHECK must emit zero check steps (GitHub #9)."""
+    url, schema = empty_postgres_db
+    engine = create_engine(url)
+    NotificationOutbox.__table__.create(engine)
+    engine.dispose()
+
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=schema)
+    plan = conform.compare([NotificationOutbox])
+    assert not isinstance(plan, dbconform.ConformError)
+    check_steps = [
+        s
+        for s in plan.steps
+        if isinstance(s, AlterTableStep) and "check constraint" in s.description.lower()
+    ]
+    assert check_steps == [], f"Unexpected check constraint steps: {check_steps}"
+
+
+@pytest.mark.asyncio
+async def test_async_apply_enum_check_with_allow_drop_extra_constraints_false(
+    empty_postgres_db: tuple[str, str],
+) -> None:
+    """Re-apply with drops disabled must not raise DuplicateObjectError (GitHub #9)."""
+    url, schema = empty_postgres_db
+    engine = create_engine(url)
+    NotificationOutbox.__table__.create(engine)
+    engine.dispose()
+
+    async_url = url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+    conform = dbconform.AsyncDbConform(credentials={"url": async_url}, target_schema=schema)
+    result = await conform.apply_changes(
+        [NotificationOutbox],
+        allow_drop_extra_constraints=False,
+    )
+    assert not isinstance(result, dbconform.ConformError), str(result)
+    check_steps = [
+        s
+        for s in result.steps
+        if isinstance(s, AlterTableStep) and "check constraint" in s.description.lower()
+    ]
+    assert check_steps == [], f"Unexpected check constraint steps: {check_steps}"

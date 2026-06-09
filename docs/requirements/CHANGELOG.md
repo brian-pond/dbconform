@@ -5,6 +5,7 @@ All notable changes to the requirements docs are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **PostgreSQL Enum CHECK constraints:** Reflected ``Enum(..., native_enum=False, create_constraint=True)`` CHECK expressions (``col::text = ANY (ARRAY[...])``) now normalize to the same canonical form as model-side ``IN (...)`` clauses, so re-compare and re-apply do not emit spurious drop/add steps or ``DuplicateObjectError`` when ``allow_drop_extra_constraints=False`` (GitHub #9).
 - **PostgreSQL BLOB/BYTEA:** Neutral `BLOB` now maps to `BYTEA` in PostgreSQL DDL; reflected `BYTEA` normalizes to neutral `BLOB` for stable compare. Fixes apply failure `type "blob" does not exist` (GitHub #3, #7).
 - **SQLModel implicit autoincrement:** Single integer PK with `Field(default=None, primary_key=True)` and empty `ColumnDefault(None)` placeholders no longer block implicit autoincrement; explicit `Identity()` maps to autoincrement (GitHub #2).
 - **PostgreSQL JSONB and TIMESTAMPTZ:** Neutral `JSONB` and `TIMESTAMPTZ` types preserve SQLAlchemy `JSONB` and `DateTime(timezone=True)` fidelity in PostgreSQL DDL and compare; plain `JSON` and naive `TIMESTAMP` remain distinct (GitHub #4, #5).

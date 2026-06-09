@@ -5,6 +5,7 @@ Traceability: docs/requirements/01-functional.md (Schema parity, Identifiers and
 """
 
 from dbconform.schema.objects import (
+    CheckDef,
     ColumnDef,
     PrimaryKeyDef,
     QualifiedName,
@@ -164,6 +165,58 @@ def test_postgresql_to_ddl_type_jsonb_and_timestamptz() -> None:
     assert dialect.to_ddl_type(jsonb_col) == "JSONB"
     assert dialect.to_ddl_type(tz_col) == "TIMESTAMPTZ"
     assert dialect.to_ddl_type(json_col) == "JSON"
+
+
+def test_postgresql_normalize_check_expression_enum_any_array() -> None:
+    """Reflected Enum CHECK (ANY/ARRAY) normalizes to IN clause (GitHub #9)."""
+    dialect = PostgreSQLDialect()
+    table = TableDef(name=QualifiedName("public", "notification_outbox"))
+    reflected = (
+        "status::text = ANY (ARRAY['pending'::character varying, "
+        "'sent'::character varying, 'failed'::character varying]::text[])"
+    )
+    normalized = dialect._normalize_check_expression(reflected, table)
+    assert normalized == "status IN ('pending', 'sent', 'failed')"
+
+
+def test_postgresql_normalize_check_expression_model_in_clause() -> None:
+    """Model-side IN clause with schema.table qualifier normalizes to bare column (GitHub #9)."""
+    dialect = PostgreSQLDialect()
+    table = TableDef(name=QualifiedName("public", "notification_outbox"))
+    model_expr = "public.notification_outbox.status IN ('pending', 'sent', 'failed')"
+    normalized = dialect._normalize_check_expression(model_expr, table)
+    assert normalized == "status IN ('pending', 'sent', 'failed')"
+
+
+def test_postgresql_normalize_reflected_table_enum_check_no_drift() -> None:
+    """Reflected and model CHECK defs compare equal after normalize_reflected_table (GitHub #9)."""
+    dialect = PostgreSQLDialect()
+    reflected = TableDef(
+        name=QualifiedName("public", "notification_outbox"),
+        columns=(ColumnDef("status", "VARCHAR", nullable=False),),
+        check_constraints=(
+            CheckDef(
+                name="outboxstatus",
+                expression=(
+                    "status::text = ANY (ARRAY['pending'::character varying, "
+                    "'sent'::character varying, 'failed'::character varying]::text[])"
+                ),
+            ),
+        ),
+    )
+    model = TableDef(
+        name=QualifiedName("public", "notification_outbox"),
+        columns=(ColumnDef("status", "VARCHAR", nullable=False),),
+        check_constraints=(
+            CheckDef(
+                name="outboxstatus",
+                expression="public.notification_outbox.status IN ('pending', 'sent', 'failed')",
+            ),
+        ),
+    )
+    normalized_reflected = dialect.normalize_reflected_table(reflected)
+    normalized_model = dialect.normalize_reflected_table(model)
+    assert normalized_reflected.check_constraints == normalized_model.check_constraints
 
 
 def test_postgresql_normalize_reflected_table_normalizes_bool_default_case() -> None:

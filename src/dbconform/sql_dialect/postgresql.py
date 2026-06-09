@@ -249,6 +249,91 @@ class PostgreSQLDialect(Dialect):
             where=where,
         )
 
+    _QUOTED_STRING = r"'((?:[^']|'')*)'"
+    _CAST_SUFFIX = r"(?:::\s*(?:character\s+varying|text|varchar))?"
+
+    def _strip_table_qualified_column(self, col_expr: str, table_def: TableDef) -> str:
+        """Strip schema.table. or table. prefix from a column reference in a CHECK expression."""
+        expr = col_expr.strip()
+        table_name = table_def.name.name
+        schema = table_def.name.schema
+        if schema:
+            prefix = f"{schema}.{table_name}."
+            if expr.lower().startswith(prefix.lower()):
+                return expr[len(prefix) :]
+        prefix = f"{table_name}."
+        if expr.lower().startswith(prefix.lower()):
+            return expr[len(prefix) :]
+        return expr
+
+    def _parse_quoted_string_literal_list(self, content: str) -> list[str] | None:
+        """
+        Parse a comma-separated list of single-quoted string literals.
+
+        Tolerates PostgreSQL cast suffixes (e.g. ``'pending'::character varying``).
+        Returns None when the list contains non-string literals.
+        """
+        content = content.strip()
+        if not content:
+            return []
+        pattern = re.compile(
+            rf"^{self._QUOTED_STRING}{self._CAST_SUFFIX}"
+            rf"(?:\s*,\s*{self._QUOTED_STRING}{self._CAST_SUFFIX})*$",
+            re.IGNORECASE,
+        )
+        if not pattern.fullmatch(content):
+            return None
+        return [m.group(1).replace("''", "'") for m in re.finditer(self._QUOTED_STRING, content)]
+
+    def _normalize_in_expression(self, col_expr: str, values_content: str, table_def: TableDef) -> str | None:
+        """Normalize ``col IN ('a', 'b')`` to ``status IN ('a', 'b')`` with unqualified column."""
+        values = self._parse_quoted_string_literal_list(values_content)
+        if values is None:
+            return None
+        col = self._strip_table_qualified_column(col_expr, table_def)
+        literals = ", ".join(f"'{v}'" for v in values)
+        return f"{col} IN ({literals})"
+
+    def _normalize_check_expression(self, expression: str, table_def: TableDef) -> str:
+        """
+        Normalize CHECK constraint expressions for stable compare with model-side schema.
+
+        PostgreSQL reflection of SQLAlchemy ``Enum(..., native_enum=False)`` CHECK
+        constraints uses ``col::text = ANY (ARRAY[...]::text[])`` while the model
+        emits ``schema.table.col IN ('a', 'b')``. Both are normalized to
+        ``col IN ('a', 'b')``. See GitHub #9.
+        """
+        expr = " ".join(expression.split()).strip()
+        while expr.startswith("(") and expr.endswith(")"):
+            expr = expr[1:-1].strip()
+
+        any_match = re.match(
+            r"^(.+?)::text\s*=\s*ANY\s*\(\s*ARRAY\[(.+?)\](?:::\s*text\[\])?\s*\)$",
+            expr,
+            re.IGNORECASE,
+        )
+        if any_match:
+            col = self._strip_table_qualified_column(any_match.group(1), table_def)
+            values = self._parse_quoted_string_literal_list(any_match.group(2))
+            if values is not None:
+                literals = ", ".join(f"'{v}'" for v in values)
+                return f"{col} IN ({literals})"
+
+        in_match = re.match(r"^(.+?)\s+IN\s*\((.+)\)$", expr, re.IGNORECASE)
+        if in_match:
+            normalized = self._normalize_in_expression(in_match.group(1), in_match.group(2), table_def)
+            if normalized is not None:
+                return normalized
+
+        return expr
+
+    def _normalize_check_def(self, check: CheckDef, table_def: TableDef) -> CheckDef:
+        """Normalize one reflected or model-side CHECK constraint for stable comparison."""
+        return CheckDef(
+            name=check.name,
+            expression=self._normalize_check_expression(check.expression, table_def),
+        )
+
     def _normalize_default_expr(self, default_expr: str | None) -> str | None:
         """
         Normalize reflected PostgreSQL default expressions for stable comparisons.
@@ -340,7 +425,7 @@ class PostgreSQLDialect(Dialect):
 
         new_indexes = tuple(self._normalize_index_def(i) for i in table_def.indexes)
 
-        return TableDef(
+        normalized_table = TableDef(
             name=table_def.name,
             columns=tuple(new_columns),
             primary_key=table_def.primary_key,
@@ -349,6 +434,19 @@ class PostgreSQLDialect(Dialect):
             check_constraints=table_def.check_constraints,
             indexes=new_indexes,
             comment=table_def.comment,
+        )
+        new_checks = tuple(
+            self._normalize_check_def(ck, normalized_table) for ck in table_def.check_constraints
+        )
+        return TableDef(
+            name=normalized_table.name,
+            columns=normalized_table.columns,
+            primary_key=normalized_table.primary_key,
+            unique_constraints=normalized_table.unique_constraints,
+            foreign_keys=normalized_table.foreign_keys,
+            check_constraints=new_checks,
+            indexes=normalized_table.indexes,
+            comment=normalized_table.comment,
         )
 
 
