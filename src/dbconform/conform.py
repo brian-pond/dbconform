@@ -401,6 +401,7 @@ class DbConform:
             model_schema = ModelSchema.from_models(
                 models,
                 target_schema=self._target_schema,
+                model_type_dialect=connection.dialect,
                 schema_normalizer=dialect,
             )
             db_schema = DatabaseSchema.from_connection(connection, self._target_schema)
@@ -578,6 +579,7 @@ class AsyncDbConform:
             model_schema = ModelSchema.from_models(
                 models,
                 target_schema=self._target_schema,
+                model_type_dialect=connection.dialect,
                 schema_normalizer=dialect,
             )
             db_schema = await DatabaseSchema.from_connection_async(connection, self._target_schema)

@@ -76,3 +76,41 @@ def test_sa_column_datetime_naive() -> None:
     """DateTime(timezone=False) maps to TIMESTAMP."""
     col = Column("created_at", sa_types.DateTime(timezone=False))
     assert sa_column_to_neutral_type(col) == "TIMESTAMP"
+
+
+def test_sa_column_type_decorator_uses_impl_without_dialect() -> None:
+    """TypeDecorator without dialect resolves via impl, not SQLite compile (GitHub #10)."""
+    from sqlalchemy import DateTime, String, TypeDecorator
+
+    class UtcDateTime(TypeDecorator):
+        """SQLite: ISO string; PostgreSQL: timestamptz."""
+
+        impl = DateTime(timezone=True)
+        cache_ok = True
+
+        def load_dialect_impl(self, dialect):
+            if dialect.name == "sqlite":
+                return dialect.type_descriptor(String(32))
+            return dialect.type_descriptor(DateTime(timezone=True))
+
+    col = Column("scheduled_for", UtcDateTime())
+    assert sa_column_to_neutral_type(col) == "TIMESTAMPTZ"
+
+
+def test_sa_column_type_decorator_per_target_dialect() -> None:
+    """TypeDecorator with dialect uses load_dialect_impl for that backend (GitHub #10)."""
+    from sqlalchemy import DateTime, String, TypeDecorator
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    class UtcDateTime(TypeDecorator):
+        impl = DateTime(timezone=True)
+        cache_ok = True
+
+        def load_dialect_impl(self, dialect):
+            if dialect.name == "sqlite":
+                return dialect.type_descriptor(String(32))
+            return dialect.type_descriptor(DateTime(timezone=True))
+
+    col = Column("scheduled_for", UtcDateTime())
+    assert sa_column_to_neutral_type(col, postgresql.dialect()) == "TIMESTAMPTZ"
+    assert sa_column_to_neutral_type(col, sqlite.dialect()) == "VARCHAR(32)"

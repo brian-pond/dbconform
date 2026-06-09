@@ -1,15 +1,23 @@
 """
-Map SQLAlchemy column types to neutral type names (no dialect).
+Map SQLAlchemy column types to neutral type names for model ingestion.
 
-Used when building internal schema from code models so that model-side schema
-does not depend on a target database. See docs/technical/02-architecture.md
-(Types, Internal schema: design goals) and the plan (Option B: neutral type vocabulary).
+Used when building internal schema from code models (not database reflection).
+Maps known SQLAlchemy types by class name; resolves ``TypeDecorator`` via
+``load_dialect_impl(model_type_dialect)`` when the conform target dialect is
+known (GitHub #10), or via ``impl`` when it is not. Does not compile
+dialect-specific types (e.g. ``postgresql.BYTEA``) with the target compiler—
+those are mapped by name so models remain portable across backends.
+
+See docs/technical/02-architecture.md (Types: model ingestion vs reflection).
 """
 
 from __future__ import annotations
 
 import re
 from typing import Any
+
+from sqlalchemy.engine import Dialect
+from sqlalchemy.types import TypeDecorator
 
 from dbconform.internal.types import (
     CanonicalType,
@@ -19,15 +27,39 @@ from dbconform.internal.types import (
 )
 
 
-def sa_column_to_neutral_type(column: Any) -> str:
+def sa_column_to_neutral_type(
+    column: Any,
+    model_type_dialect: Dialect | None = None,
+) -> str:
     """
-    Return the neutral data_type_name for a SQLAlchemy column (no dialect).
+    Return the neutral data_type_name for a SQLAlchemy column (model ingestion path).
 
     Maps common SQLAlchemy types to the neutral vocabulary (INTEGER, VARCHAR(n),
-    TEXT, FLOAT, BOOLEAN, DATE, TIMESTAMP, NUMERIC(p,s), etc.). Used when building
-    ModelSchema from models so that no target database is assumed.
+    TEXT, etc.). When ``model_type_dialect`` is provided,
+    :class:`~sqlalchemy.types.TypeDecorator` subclasses are resolved via
+    :meth:`~sqlalchemy.types.TypeDecorator.load_dialect_impl`. When it is None,
+    ``TypeDecorator`` falls back to its ``impl`` attribute.
     """
-    typ = column.type
+    return sa_type_to_neutral_type(column.type, model_type_dialect=model_type_dialect)
+
+
+def sa_type_to_neutral_type(
+    typ: Any,
+    model_type_dialect: Dialect | None = None,
+) -> str:
+    """
+    Return the neutral data_type_name for a SQLAlchemy type object (model ingestion path).
+
+    See :func:`sa_column_to_neutral_type`.
+    """
+    if isinstance(typ, TypeDecorator):
+        resolved = (
+            typ.load_dialect_impl(model_type_dialect)
+            if model_type_dialect is not None
+            else typ.impl
+        )
+        return sa_type_to_neutral_type(resolved, model_type_dialect=model_type_dialect)
+
     type_cls = type(typ)
     name = type_cls.__name__
 
@@ -67,12 +99,12 @@ def sa_column_to_neutral_type(column: Any) -> str:
     if name == "JSON":
         return CanonicalType.JSON
 
-    # Fallback: try compile with a generic dialect to get a string, then normalize
-    # so we don't fail on custom or rare types. Use SQLite as a simple dialect.
+    # Last resort for unknown types: compile (never used for known dialect-specific types).
     try:
         from sqlalchemy.dialects import sqlite
 
-        compiled = typ.compile(dialect=sqlite.dialect())
+        compile_dialect = model_type_dialect if model_type_dialect is not None else sqlite.dialect()
+        compiled = typ.compile(dialect=compile_dialect)
         # Normalize common SQLite outputs to neutral
         c = str(compiled).strip().upper()
         if c == "INTEGER":

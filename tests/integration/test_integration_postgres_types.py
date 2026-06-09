@@ -3,14 +3,14 @@ Integration tests: PostgreSQL-specific neutral type mapping.
 
 Traceability: docs/requirements/01-functional.md (Schema parity, Backends).
 GitHub #3 (DDL emits BYTEA), #7 (reflected BYTEA normalizes to BLOB),
-#4 (JSONB), #5 (TIMESTAMPTZ).
+#4 (JSONB), #5 (TIMESTAMPTZ), #10 (TypeDecorator dialect resolution).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, create_engine, text
+from sqlalchemy import DateTime, String, TypeDecorator, create_engine, select, text
 from sqlalchemy.dialects.postgresql import BYTEA, JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 import dbconform
 from dbconform.plan import CreateTableStep
@@ -37,6 +37,27 @@ class BrokerQueue(_BinaryBase):
     queue_name: Mapped[str] = mapped_column(primary_key=True)
     headers: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UtcDateTime(TypeDecorator):
+    """SQLite: ISO string; PostgreSQL: timestamptz (GitHub #10 repro)."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(String(32))
+        return dialect.type_descriptor(DateTime(timezone=True))
+
+
+class TaskRunGroup(_BinaryBase):
+    """Model with TypeDecorator column that maps per dialect."""
+
+    __tablename__ = "task_run_groups"
+
+    run_group_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scheduled_for: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
 
 
 def _pg_column_type(url: str, schema: str, table: str, column: str) -> str:
@@ -99,3 +120,32 @@ def test_apply_jsonb_and_timestamptz_postgres(empty_postgres_db: tuple[str, str]
     recompare = conform.compare([BrokerQueue])
     assert not isinstance(recompare, dbconform.ConformError)
     assert len(recompare.steps) == 0
+
+
+def test_apply_type_decorator_timestamptz_postgres(empty_postgres_db: tuple[str, str]) -> None:
+    """TypeDecorator with load_dialect_impl creates TIMESTAMPTZ on PostgreSQL (GitHub #10)."""
+    url, schema = empty_postgres_db
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=schema)
+    plan = conform.compare([TaskRunGroup])
+    assert not isinstance(plan, dbconform.ConformError)
+    assert any(isinstance(s, CreateTableStep) for s in plan.steps)
+
+    result = conform.apply_changes([TaskRunGroup], emit_log=False)
+    assert not isinstance(result, dbconform.ConformError)
+
+    assert _pg_column_type(url, schema, "task_run_groups", "scheduled_for") == (
+        "timestamp with time zone"
+    )
+
+    recompare = conform.compare([TaskRunGroup])
+    assert not isinstance(recompare, dbconform.ConformError)
+    assert len(recompare.steps) == 0
+
+    engine = create_engine(url)
+    with Session(engine) as session:
+        session.execute(
+            select(TaskRunGroup).where(
+                TaskRunGroup.scheduled_for <= datetime.now(timezone.utc)
+            )
+        )
+    engine.dispose()

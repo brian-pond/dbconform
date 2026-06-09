@@ -61,11 +61,29 @@ def _get_table_from_model(model: type) -> Table:
     return table
 
 
-def _column_type_str(column: Any, dialect: Dialect | None) -> str:
-    """Return neutral type string for internal schema (dialect=None) or compiled type (dialect set)."""
-    if dialect is None:
-        return sa_column_to_neutral_type(column)
-    return column.type.compile(dialect=dialect)
+def _ingest_model_column_type(
+    column: Any,
+    *,
+    model_type_dialect: Dialect | None = None,
+) -> str:
+    """
+    Resolve a model column type to a neutral data_type_name (ingestion path).
+
+    Uses name-based mapping in :func:`sa_column_to_neutral_type`, not SQLAlchemy
+    compile. ``model_type_dialect`` is passed through for ``TypeDecorator``
+    resolution only (GitHub #10).
+    """
+    return sa_column_to_neutral_type(column, model_type_dialect=model_type_dialect)
+
+
+def _reflect_column_type(column: Any, reflection_dialect: Dialect) -> str:
+    """
+    Resolve a reflected column type by compiling with the connection dialect.
+
+    Reflection path only. Output is normalized to neutral form by the backend
+    Dialect's ``normalize_reflected_table`` / ``to_neutral_type``.
+    """
+    return column.type.compile(dialect=reflection_dialect)
 
 
 def _check_expression_str(sqltext: Any) -> str:
@@ -128,7 +146,7 @@ def _python_scalar_to_sql_literal(value: Any) -> str | None:
     return None
 
 
-def _default_expr(column: Any, _dialect: Dialect | None) -> str | None:
+def _default_expr(column: Any, _reflection_dialect: Dialect | None) -> str | None:
     """
     Return a column default as a SQL expression string for DDL, or None.
 
@@ -290,9 +308,23 @@ def _column_is_implicit_autoincrement_pk(
 def _extract_table_def(
     table: Table,
     target_schema: str | None,
-    dialect: Dialect | None = None,
+    *,
+    reflection_dialect: Dialect | None = None,
+    model_type_dialect: Dialect | None = None,
 ) -> TableDef:
-    """Build a TableDef from a SQLAlchemy Table. When dialect is None, use neutral type names."""
+    """
+    Build a TableDef from a SQLAlchemy Table.
+
+    Column types use one of two resolution strategies (mutually exclusive):
+
+    - **Reflection** (``reflection_dialect`` set): compile each column type with
+      the connection dialect; caller applies ``normalize_reflected_table``.
+    - **Model ingestion** (``reflection_dialect`` is None): map types to neutral
+      names via :func:`_ingest_model_column_type`; optional ``model_type_dialect``
+      resolves ``TypeDecorator`` for the conform target backend.
+
+    See docs/technical/02-architecture.md (Types).
+    """
     schema = table.schema if table.schema is not None else target_schema
     qualified_name = QualifiedName(schema=schema, name=table.name)
 
@@ -302,8 +334,11 @@ def _extract_table_def(
     pk_col_name = list(table.primary_key.columns)[0].name if is_single_pk else None
     _integer_type_names = ("Integer", "INTEGER", "BigInteger", "BIGINT", "SmallInteger", "SMALLINT")
     for col in table.c:
-        default = _default_expr(col, dialect)
-        type_str = _column_type_str(col, dialect)
+        default = _default_expr(col, reflection_dialect)
+        if reflection_dialect is not None:
+            type_str = _reflect_column_type(col, reflection_dialect)
+        else:
+            type_str = _ingest_model_column_type(col, model_type_dialect=model_type_dialect)
         comment = getattr(col, "comment", None)
         autoincrement = _column_is_implicit_autoincrement_pk(
             col,
@@ -401,17 +436,20 @@ class ModelSchema:
         models: type | Sequence[type],
         target_schema: str | None = None,
         *,
+        model_type_dialect: Dialect | None = None,
         schema_normalizer: _SchemaNormalizer | None = None,
     ) -> ModelSchema:
         """
         Build ModelSchema from one or more model classes.
 
-        Each model must have __table__ (SQLAlchemy Table). Column types are
-        mapped to neutral type names (no target database). target_schema is
-        used when table.schema is None (e.g. PostgreSQL default schema).
-        If schema_normalizer is provided (e.g. dbconform Dialect), its
-        normalize_reflected_table is applied so model-side internal schema
-        compares equal to database-side internal schema.
+        Each model must have __table__ (SQLAlchemy Table). Column types use the
+        model ingestion path (:func:`_ingest_model_column_type`). When
+        ``model_type_dialect`` is the conform target connection dialect,
+        ``TypeDecorator`` columns resolve via ``load_dialect_impl`` (GitHub #10).
+        ``target_schema`` is used when table.schema is None (e.g. PostgreSQL
+        default schema). If ``schema_normalizer`` is provided (e.g. dbconform
+        Dialect), its ``normalize_reflected_table`` is applied so model-side
+        internal schema compares equal to database-side internal schema.
         """
         if isinstance(models, type):
             model_seq: Sequence[type] = (models,)
@@ -420,7 +458,11 @@ class ModelSchema:
         instance = cls()
         for model in model_seq:
             table = _get_table_from_model(model)
-            table_def = _extract_table_def(table, target_schema, dialect=None)
+            table_def = _extract_table_def(
+                table,
+                target_schema,
+                model_type_dialect=model_type_dialect,
+            )
             if schema_normalizer is not None:
                 table_def = schema_normalizer.normalize_reflected_table(table_def)
             instance._tables[table_def.name] = table_def

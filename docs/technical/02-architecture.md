@@ -63,11 +63,13 @@ flowchart LR
 
 ## Types
 
-Column types are represented in the internal schema as **data_type_name** (a string on `ColumnDef`). The flow is:
+Column types are represented in the internal schema as **data_type_name** (a string on `ColumnDef`). Two explicit resolution strategies feed the same neutral vocabulary:
 
-1. **Model → internal**: SQLAlchemy column types are compiled with the connection dialect (`column.type.compile(dialect)`), producing a type string. Optionally, a schema normalizer (dbconform Dialect) rewrites the table so type strings match a neutral form (e.g. PostgreSQL: `CHARACTER VARYING(255)` → `VARCHAR(255)`, `DOUBLE PRECISION` → `FLOAT`).
-2. **Reflection → internal**: Reflected tables are built from DB metadata (same compile); then the backend’s Dialect **normalize_reflected_table** and **to_neutral_type** rewrite columns so they use the same neutral type strings (e.g. SERIAL/nextval → `default=None`, `autoincrement=True`, neutral type string).
+1. **Model ingestion → internal** (`_ingest_model_column_type`): SQLAlchemy column types are mapped to neutral names by class name (INTEGER, VARCHAR(n), JSONB, BLOB, etc.). This path does **not** compile types with the target dialect, so models may declare dialect-specific types (e.g. `postgresql.BYTEA`) and still ingest correctly when the conform target is another backend (BYTEA → neutral BLOB). When the conform target connection dialect is known, it is passed as `model_type_dialect` so `TypeDecorator` subclasses resolve via `load_dialect_impl()` (GitHub #10); without it, `TypeDecorator` uses its `impl`. Optionally, the backend Dialect's **normalize_reflected_table** rewrites the table so model-side strings match reflected-side normalization (e.g. SERIAL/nextval handling).
+2. **Reflection → internal** (`_reflect_column_type`): Reflected columns are compiled with the connection dialect (`column.type.compile(reflection_dialect)`), producing platform type strings. The backend Dialect's **normalize_reflected_table** and **to_neutral_type** then rewrite columns to the same neutral strings as ingestion (e.g. `CHARACTER VARYING(255)` → `VARCHAR(255)`, SERIAL/nextval → `default=None`, `autoincrement=True`).
 3. **Neutral → DDL**: When generating SQL, each Dialect maps **data_type_name** to platform-specific DDL (e.g. SQLite maps `JSONB` → `JSON`; PostgreSQL maps INTEGER + autoincrement PK → SERIAL, `BLOB` → `BYTEA`, `JSONB` → `JSONB`, `TIMESTAMPTZ` → `TIMESTAMPTZ`). Shared parsing (e.g. VARCHAR length) lives on the base Dialect (`_parse_varchar_length`).
+
+Do not use the reflection compile path for model ingestion: compiling dialect-specific model types against the wrong backend fails (e.g. `BYTEA` on SQLite) and `TypeDecorator` names are not visible to the compiler without `load_dialect_impl`.
 
 Neutral vocabulary includes distinct types where backends differ: e.g. `JSON` vs `JSONB`, `TIMESTAMP` vs `TIMESTAMPTZ`, and `BLOB` (binary) mapped per dialect.
 

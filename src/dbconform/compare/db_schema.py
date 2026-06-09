@@ -72,7 +72,11 @@ class DatabaseSchema:
             schema = table.schema if table.schema is not None else target_schema
             if target_schema is not None and schema != target_schema:
                 continue
-            table_def = _extract_table_def(table, target_schema, dialect=dialect)
+            table_def = _extract_table_def(
+                table,
+                target_schema,
+                reflection_dialect=dialect,
+            )
             table_def = _dialect_for_connection(connection).normalize_reflected_table(table_def)
             instance._tables[table_def.name] = table_def
         return instance
