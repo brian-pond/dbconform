@@ -60,6 +60,15 @@ class TaskRunGroup(_BinaryBase):
     scheduled_for: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
 
 
+class AttemptBlob(_BinaryBase):
+    """BTU-style table: TypeDecorator timestamptz column (GitHub #10 migration)."""
+
+    __tablename__ = "attempt_blobs"
+
+    attempt_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
 def _pg_column_type(url: str, schema: str, table: str, column: str) -> str:
     """Return PostgreSQL data_type for a column from information_schema."""
     engine = create_engine(url)
@@ -147,5 +156,60 @@ def test_apply_type_decorator_timestamptz_postgres(empty_postgres_db: tuple[str,
             select(TaskRunGroup).where(
                 TaskRunGroup.scheduled_for <= datetime.now(timezone.utc)
             )
+        )
+    engine.dispose()
+
+
+def test_alter_varchar_to_timestamptz_postgres_issue10_migration(
+    empty_postgres_db: tuple[str, str],
+) -> None:
+    """
+    Migrate VARCHAR column (wrong DDL from issue #10) to TIMESTAMPTZ with USING cast.
+
+    Simulates BTU tables created before TypeDecorator fix; apply_changes must succeed.
+    Traceability: docs/requirements/01-functional.md (Data operations: type changes).
+    """
+    url, schema = empty_postgres_db
+    engine = create_engine(url)
+    ts = "2024-06-01T12:00:00+00:00"
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                f'CREATE TABLE "{schema}"."attempt_blobs" ('
+                f'"attempt_id" VARCHAR(36) PRIMARY KEY, '
+                f'"created_at" VARCHAR(32) NOT NULL)'
+            )
+        )
+        conn.execute(
+            text(
+                f'INSERT INTO "{schema}"."attempt_blobs" ("attempt_id", "created_at") '
+                f"VALUES ('a1', :ts)"
+            ),
+            {"ts": ts},
+        )
+        conn.commit()
+    engine.dispose()
+
+    conform = dbconform.DbConform(credentials={"url": url}, target_schema=schema)
+    plan = conform.compare([AttemptBlob])
+    assert not isinstance(plan, dbconform.ConformError)
+    assert "USING" in plan.sql()
+    assert "TIMESTAMPTZ" in plan.sql()
+
+    result = conform.apply_changes([AttemptBlob], emit_log=False)
+    assert not isinstance(result, dbconform.ConformError)
+
+    assert _pg_column_type(url, schema, "attempt_blobs", "created_at") == (
+        "timestamp with time zone"
+    )
+
+    recompare = conform.compare([AttemptBlob])
+    assert not isinstance(recompare, dbconform.ConformError)
+    assert len(recompare.steps) == 0
+
+    engine = create_engine(url)
+    with Session(engine) as session:
+        session.execute(
+            select(AttemptBlob).where(AttemptBlob.created_at <= datetime.now(timezone.utc))
         )
     engine.dispose()

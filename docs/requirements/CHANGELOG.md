@@ -6,6 +6,7 @@ All notable changes to the requirements docs are documented here.
 
 ### Fixed
 - **TypeDecorator columns:** Model-side schema now resolves ``TypeDecorator`` subclasses via ``load_dialect_impl()`` using the conform target dialect, so dialect-specific types (e.g. ``UtcDateTime`` → ``TIMESTAMPTZ`` on PostgreSQL, ``VARCHAR(32)`` on SQLite) no longer fall back to SQLite compilation and produce wrong DDL (GitHub #10).
+- **PostgreSQL ALTER COLUMN type casts:** Cross-type alters that PostgreSQL cannot auto-cast (e.g. ``VARCHAR`` → ``TIMESTAMPTZ`` when migrating tables created with wrong types before #10) now emit an explicit ``USING`` clause with the appropriate cast.
 - **PostgreSQL Enum CHECK constraints:** Reflected ``Enum(..., native_enum=False, create_constraint=True)`` CHECK expressions (``col::text = ANY (ARRAY[...])``) now normalize to the same canonical form as model-side ``IN (...)`` clauses, so re-compare and re-apply do not emit spurious drop/add steps or ``DuplicateObjectError`` when ``allow_drop_extra_constraints=False`` (GitHub #9).
 - **PostgreSQL BLOB/BYTEA:** Neutral `BLOB` now maps to `BYTEA` in PostgreSQL DDL; reflected `BYTEA` normalizes to neutral `BLOB` for stable compare. Fixes apply failure `type "blob" does not exist` (GitHub #3, #7).
 - **SQLModel implicit autoincrement:** Single integer PK with `Field(default=None, primary_key=True)` and empty `ColumnDefault(None)` placeholders no longer block implicit autoincrement; explicit `Identity()` maps to autoincrement (GitHub #2).

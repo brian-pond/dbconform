@@ -132,6 +132,81 @@ class PostgreSQLDialect(Dialect):
         new_len = self._parse_varchar_length(new_column.data_type_name)
         return old_len is not None and new_len is not None and new_len < old_len
 
+    def _neutral_type_family(self, data_type_name: str) -> str:
+        """
+        Coarse neutral type family for ALTER COLUMN cast decisions.
+
+        Traceability: docs/requirements/01-functional.md (Data operations: type changes).
+        """
+        u = " ".join(data_type_name.split()).strip().upper()
+        if re.match(r"(CHARACTER\s+VARYING|VARCHAR|CHAR)\s*\(", u) or u == "TEXT":
+            return "string"
+        if u in ("TIMESTAMPTZ", "TIMESTAMP WITH TIME ZONE"):
+            return "timestamptz"
+        if u in ("TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE"):
+            return "timestamp"
+        if u == "DATE":
+            return "date"
+        if u in ("INTEGER", "INT", "SERIAL", "SMALLINT", "BIGINT", "BIGSERIAL", "INT8"):
+            return "integer"
+        if u in ("FLOAT", "DOUBLE PRECISION", "REAL") or u.startswith("NUMERIC"):
+            return "numeric"
+        if u == "BOOLEAN":
+            return "boolean"
+        if u in ("JSON", "JSONB"):
+            return "json"
+        if u == "BYTEA":
+            return "binary"
+        return "other"
+
+    def _pg_cast_type_name(self, ddl_type: str) -> str:
+        """PostgreSQL cast target name for a DDL type (USING clause)."""
+        u = ddl_type.strip().upper()
+        if u == "TIMESTAMPTZ":
+            return "timestamp with time zone"
+        if u == "TIMESTAMP":
+            return "timestamp without time zone"
+        return ddl_type
+
+    def _alter_column_type_using_clause(
+        self,
+        old_column: ColumnDef,
+        new_column: ColumnDef,
+        quoted_col: str,
+        ddl_type: str,
+    ) -> str:
+        """
+        Return a PostgreSQL ``USING`` fragment for ``ALTER ... TYPE``, or ``""``.
+
+        PostgreSQL rejects some cross-type alters without an explicit cast (e.g.
+        ``VARCHAR`` ISO strings → ``TIMESTAMPTZ`` after issue #10 mis-sync).
+        """
+        old_fam = self._neutral_type_family(old_column.data_type_name)
+        new_fam = self._neutral_type_family(new_column.data_type_name)
+        if old_fam == new_fam:
+            return ""
+
+        cast_by_family: dict[tuple[str, str], str | None] = {
+            ("string", "timestamptz"): "timestamp with time zone",
+            ("string", "timestamp"): "timestamp without time zone",
+            ("string", "date"): "date",
+            ("string", "boolean"): "boolean",
+            ("string", "integer"): None,
+            ("string", "numeric"): None,
+            ("string", "json"): None,
+            ("timestamptz", "string"): "text",
+            ("timestamp", "string"): "text",
+            ("date", "string"): "text",
+            ("integer", "string"): "text",
+            ("json", "string"): "text",
+        }
+        cast_target = cast_by_family.get((old_fam, new_fam))
+        if cast_target is None and (old_fam, new_fam) not in cast_by_family:
+            return ""
+        if cast_target is None:
+            cast_target = self._pg_cast_type_name(ddl_type)
+        return f" USING {quoted_col}::{cast_target}"
+
     def alter_column_sql(
         self,
         table_name: QualifiedName,
@@ -144,7 +219,8 @@ class PostgreSQLDialect(Dialect):
         stmts: list[str] = []
         if old_column.data_type_name != new_column.data_type_name:
             ddl_type = self.to_ddl_type(new_column)
-            stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} TYPE {ddl_type}")
+            using = self._alter_column_type_using_clause(old_column, new_column, qcol, ddl_type)
+            stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} TYPE {ddl_type}{using}")
         if old_column.nullable != new_column.nullable:
             if new_column.nullable:
                 stmts.append(f"ALTER TABLE {tbl} ALTER COLUMN {qcol} DROP NOT NULL")

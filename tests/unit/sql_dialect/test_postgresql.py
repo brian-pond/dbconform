@@ -54,6 +54,19 @@ def test_postgresql_alter_column_sql() -> None:
     assert "SET NOT NULL" in sql
 
 
+def test_postgresql_alter_column_sql_varchar_to_timestamptz_using() -> None:
+    """VARCHAR → TIMESTAMPTZ emits USING cast (GitHub #10 migration path)."""
+    dialect = PostgreSQLDialect()
+    tbl = QualifiedName("public", "attempt_blobs")
+    old_col = ColumnDef("created_at", "VARCHAR(32)", nullable=False)
+    new_col = ColumnDef("created_at", "TIMESTAMPTZ", nullable=False)
+    sql = dialect.alter_column_sql(tbl, old_col, new_col)
+    assert sql is not None
+    assert "TYPE TIMESTAMPTZ" in sql
+    assert "USING" in sql
+    assert '"created_at"::timestamp with time zone' in sql
+
+
 def test_postgresql_drop_index_schema_qualified() -> None:
     """PostgreSQL DROP INDEX can be schema-qualified."""
     dialect = PostgreSQLDialect()
