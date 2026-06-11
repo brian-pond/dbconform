@@ -10,9 +10,10 @@ control destructive steps.
 from collections import OrderedDict
 
 from dbconform.plan.builder import ConformPlanBuilder
-from dbconform.plan.steps import ConformPlan, DropTableStep, RebuildTableStep, SkippedStep
+from dbconform.plan.steps import AlterTableStep, ConformPlan, DropTableStep, RebuildTableStep, SkippedStep
 from dbconform.schema.diff import DiffResult, TableDiff
-from dbconform.schema.objects import ColumnDef, IndexDef, QualifiedName, TableDef
+from dbconform.schema.objects import CheckDef, ColumnDef, IndexDef, QualifiedName, TableDef
+from dbconform.sql_dialect.postgresql import PostgreSQLDialect
 from dbconform.sql_dialect.sqlite import SQLiteDialect
 
 
@@ -306,6 +307,94 @@ def test_builder_removed_index_drop_when_allow_drop_extra_constraints_true() -> 
     assert len(plan.steps) == 1
     assert "DROP INDEX" in (plan.steps[0].sql or "")
     assert "idx_t_id" in (plan.steps[0].sql or "")
+
+
+def test_builder_modified_check_skipped_when_allow_drop_extra_constraints_false() -> None:
+    """Same-name CHECK with new expression -> skipped ADD when drops disabled (GitHub #11)."""
+    qualified = QualifiedName("public", "task_run_attempts")
+    old_expr = "run_status IN ('pending', 'in_progress')"
+    new_expr = "run_status IN ('pending', 'in_progress', 'execution_timeout')"
+    old_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("run_status", "VARCHAR", nullable=False),),
+        check_constraints=(CheckDef(name="runstatus", expression=old_expr),),
+    )
+    new_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("run_status", "VARCHAR", nullable=False),),
+        check_constraints=(CheckDef(name="runstatus", expression=new_expr),),
+    )
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict(),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        removed_checks=(CheckDef(name="runstatus", expression=old_expr),),
+                        added_checks=(CheckDef(name="runstatus", expression=new_expr),),
+                    ),
+                ),
+            ]
+        ),
+    )
+    plan = ConformPlanBuilder(
+        PostgreSQLDialect(), allow_drop_extra_constraints=False
+    ).build(diff)
+    assert len(plan.steps) == 0
+    assert len(plan.skipped_steps) == 1
+    assert isinstance(plan.skipped_steps[0], SkippedStep)
+    assert "runstatus" in plan.skipped_steps[0].description
+    assert "allow_drop_extra_constraints=False" in plan.skipped_steps[0].reason
+
+
+def test_builder_modified_check_drop_then_add_when_allow_drop_extra_constraints_true() -> None:
+    """Same-name CHECK with new expression -> DROP then ADD when drops allowed (GitHub #11)."""
+    qualified = QualifiedName("public", "task_run_attempts")
+    old_expr = "run_status IN ('pending', 'in_progress')"
+    new_expr = "run_status IN ('pending', 'in_progress', 'execution_timeout')"
+    old_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("run_status", "VARCHAR", nullable=False),),
+        check_constraints=(CheckDef(name="runstatus", expression=old_expr),),
+    )
+    new_table = TableDef(
+        name=qualified,
+        columns=(ColumnDef("run_status", "VARCHAR", nullable=False),),
+        check_constraints=(CheckDef(name="runstatus", expression=new_expr),),
+    )
+    diff = DiffResult(
+        added_tables=OrderedDict(),
+        removed_tables=OrderedDict(),
+        modified_tables=OrderedDict(
+            [
+                (
+                    qualified,
+                    TableDiff(
+                        old_table=old_table,
+                        new_table=new_table,
+                        removed_checks=(CheckDef(name="runstatus", expression=old_expr),),
+                        added_checks=(CheckDef(name="runstatus", expression=new_expr),),
+                    ),
+                ),
+            ]
+        ),
+    )
+    plan = ConformPlanBuilder(PostgreSQLDialect()).build(diff)
+    check_steps = [
+        s
+        for s in plan.steps
+        if isinstance(s, AlterTableStep) and "check constraint" in s.description.lower()
+    ]
+    assert len(check_steps) == 2
+    assert "DROP CONSTRAINT" in (check_steps[0].sql or "")
+    assert "ADD CONSTRAINT" in (check_steps[1].sql or "")
+    assert "runstatus" in (check_steps[0].sql or "")
+    assert "runstatus" in (check_steps[1].sql or "")
+    assert len(plan.skipped_steps) == 0
 
 
 def test_builder_removed_index_no_drop_when_allow_drop_extra_constraints_false() -> None:

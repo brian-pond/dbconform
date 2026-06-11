@@ -35,7 +35,7 @@
 - **Opt-in flags**: The API exposes five boolean flags on `compare()` and `apply_changes()`:
   - **allow_drop_extra_tables**: when True, the plan may include DROP TABLE steps for tables present in the DB but not in the model. Default false.
   - **allow_drop_extra_columns**: when True, the plan may include DROP COLUMN steps for columns present in the DB but not in the model. Default false.
-  - **allow_drop_extra_constraints**: when True (default), the plan may include DROP CONSTRAINT / DROP INDEX steps for unique, foreign key, check, or index objects removed from the model. Default True (no data loss, easily reversible).
+  - **allow_drop_extra_constraints**: when True (default), the plan may include DROP CONSTRAINT / DROP INDEX steps for unique, foreign key, check, or index objects removed from the model. Default True (no data loss, easily reversible). When False, same-name CHECK constraint expression changes (e.g. SQLAlchemy `Enum` member add/remove) are skipped and recorded in `plan.skipped_steps` rather than emitting `ADD CONSTRAINT` after a blocked DROP.
   - **allow_shrink_column**: when True, the plan may include ALTER COLUMN steps that shrink a column (e.g. reduce VARCHAR length); when False (default), such changes are omitted to avoid data-loss risk unless the caller opts in.
   - **allow_sqlite_table_rebuild**: when True (default), SQLite tables missing CHECK, UNIQUE, or FOREIGN KEY constraints are rebuilt (create new table with constraints, copy data, drop old, rename) to achieve parity. When False, such constraint adds are skipped and recorded in `plan.skipped_steps`; drift remains and is logged clearly.
 

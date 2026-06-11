@@ -166,6 +166,12 @@ class ConformPlanBuilder:
                 )
                 continue
 
+            # Diff keys checks by (name, expression); expression changes appear as
+            # removed + added. When drops are disabled, skip ADD to avoid duplicate constraint.
+            removed_check_names = {
+                ck.name for ck in table_diff.removed_checks if ck.name is not None
+            }
+
             if self.allow_drop_extra_constraints:
                 for idx in table_diff.removed_indexes:
                     sql = self.dialect.drop_index_sql(idx.name, name)
@@ -295,6 +301,22 @@ class ConformPlanBuilder:
                         )
                     )
             for ck in table_diff.added_checks:
+                if (
+                    ck.name is not None
+                    and ck.name in removed_check_names
+                    and not self.allow_drop_extra_constraints
+                ):
+                    skipped_steps.append(
+                        SkippedStep(
+                            description=f"Modify check constraint {ck.name} on {name}",
+                            reason=(
+                                "Check constraint update blocked: "
+                                "allow_drop_extra_constraints=False"
+                            ),
+                            table_name=name,
+                        )
+                    )
+                    continue
                 if self.dialect.name == "sqlite":
                     skipped_steps.append(
                         SkippedStep(

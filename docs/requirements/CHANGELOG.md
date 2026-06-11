@@ -5,6 +5,7 @@ All notable changes to the requirements docs are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **CHECK constraint updates with drops disabled:** When a same-name CHECK constraint expression changes (e.g. SQLAlchemy ``Enum`` member add/remove), compare reports removed + added checks. With ``allow_drop_extra_constraints=False``, the plan no longer emits ``ADD CONSTRAINT`` for the replacement (which caused PostgreSQL ``DuplicateObjectError``); the step is recorded in ``plan.skipped_steps`` instead. See 01-functional (Opt-in flags) (GitHub #11).
 - **TypeDecorator columns:** Model-side schema now resolves ``TypeDecorator`` subclasses via ``load_dialect_impl()`` using the conform target dialect, so dialect-specific types (e.g. ``UtcDateTime`` → ``TIMESTAMPTZ`` on PostgreSQL, ``VARCHAR(32)`` on SQLite) no longer fall back to SQLite compilation and produce wrong DDL (GitHub #10).
 - **PostgreSQL ALTER COLUMN type casts:** Cross-type alters that PostgreSQL cannot auto-cast (e.g. ``VARCHAR`` → ``TIMESTAMPTZ`` when migrating tables created with wrong types before #10) now emit an explicit ``USING`` clause with the appropriate cast.
 - **PostgreSQL Enum CHECK constraints:** Reflected ``Enum(..., native_enum=False, create_constraint=True)`` CHECK expressions (``col::text = ANY (ARRAY[...])``) now normalize to the same canonical form as model-side ``IN (...)`` clauses, so re-compare and re-apply do not emit spurious drop/add steps or ``DuplicateObjectError`` when ``allow_drop_extra_constraints=False`` (GitHub #9).
