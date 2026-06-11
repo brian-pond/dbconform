@@ -8,13 +8,13 @@ Uses SQLAlchemy reflection; target_schema filters which tables are included
 
 from __future__ import annotations
 
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.schema import Table
 
 from dbconform.adapters.model_schema import _extract_table_def
-from dbconform.internal.objects import QualifiedName, TableDef
+from dbconform.internal.objects import CheckDef, QualifiedName, TableDef
 
 
 def _dialect_for_connection(connection: Connection):
@@ -29,6 +29,43 @@ def _dialect_for_connection(connection: Connection):
             return PostgreSQLDialect()
         case _:
             raise ValueError(f"Unsupported dialect: {name}. Supported: sqlite, postgresql.")
+
+
+def _patch_postgresql_check_expressions(
+    connection: Connection,
+    table_def: TableDef,
+) -> TableDef:
+    """
+    Replace reflected CHECK sqltext with ``pg_get_constraintdef`` bodies (GitHub #12).
+
+    SQLAlchemy's inspector truncates complex CHECK predicates on PostgreSQL.
+    """
+    from dbconform.sql_dialect.postgresql import PostgreSQLDialect
+
+    catalog = PostgreSQLDialect().fetch_check_expressions_from_catalog(
+        connection,
+        table_def.name,
+    )
+    if not catalog:
+        return table_def
+    new_checks: list[CheckDef] = []
+    for ck in table_def.check_constraints:
+        if ck.name and ck.name in catalog:
+            new_checks.append(CheckDef(name=ck.name, expression=catalog[ck.name]))
+        else:
+            new_checks.append(ck)
+    if tuple(new_checks) == table_def.check_constraints:
+        return table_def
+    return TableDef(
+        name=table_def.name,
+        columns=table_def.columns,
+        primary_key=table_def.primary_key,
+        unique_constraints=table_def.unique_constraints,
+        foreign_keys=table_def.foreign_keys,
+        check_constraints=tuple(new_checks),
+        indexes=table_def.indexes,
+        comment=table_def.comment,
+    )
 
 
 class DatabaseSchema:
@@ -77,6 +114,8 @@ class DatabaseSchema:
                 target_schema,
                 reflection_dialect=dialect,
             )
+            if dialect.name == "postgresql" and table_def.check_constraints:
+                table_def = _patch_postgresql_check_expressions(connection, table_def)
             table_def = _dialect_for_connection(connection).normalize_reflected_table(table_def)
             instance._tables[table_def.name] = table_def
         return instance

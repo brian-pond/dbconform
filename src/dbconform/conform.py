@@ -20,7 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from dbconform.adapters import ModelSchema
 from dbconform.compare import DatabaseSchema, SchemaDiffer
 from dbconform.errors import ConformError
+from dbconform.internal.objects import QualifiedName
 from dbconform.plan import ConformPlan, ConformPlanBuilder
+from dbconform.plan.skipped_policy import finalize_plan_drift
+from dbconform.plan.not_null_backfill import tables_needing_row_probe
 from dbconform.plan.steps import (
     AlterTableStep,
     ConformStep,
@@ -28,10 +31,44 @@ from dbconform.plan.steps import (
     CreateTableStep,
     DropTableStep,
     RebuildTableStep,
-    SkippedStep,
+
 )
 from dbconform.sql_dialect.sqlite_rebuild import build_rebuild_statements
 from dbconform.sql_dialect import Dialect, PostgreSQLDialect, SQLiteDialect
+
+
+def _probe_tables_with_rows_sync(
+    connection: Connection,
+    dialect: Dialect,
+    table_names: list[QualifiedName],
+) -> frozenset[QualifiedName]:
+    """Return tables that contain at least one row (for NOT NULL backfill planning)."""
+    if not table_names:
+        return frozenset()
+    found: set[QualifiedName] = set()
+    for name in table_names:
+        tbl = dialect.qualified_table(name)
+        result = connection.execute(text(f"SELECT EXISTS (SELECT 1 FROM {tbl} LIMIT 1)"))
+        if result.scalar():
+            found.add(name)
+    return frozenset(found)
+
+
+async def _probe_tables_with_rows_async(
+    connection: AsyncConnection,
+    dialect: Dialect,
+    table_names: list[QualifiedName],
+) -> frozenset[QualifiedName]:
+    """Async variant of :func:`_probe_tables_with_rows_sync`."""
+    if not table_names:
+        return frozenset()
+    found: set[QualifiedName] = set()
+    for name in table_names:
+        tbl = dialect.qualified_table(name)
+        result = await connection.execute(text(f"SELECT EXISTS (SELECT 1 FROM {tbl} LIMIT 1)"))
+        if result.scalar():
+            found.add(name)
+    return frozenset(found)
 
 
 def _emit_apply_log(
@@ -68,58 +105,6 @@ def _step_target_for_error(step: ConformStep, index: int) -> tuple[str, str]:
             if getattr(step, "table", None):
                 return ("table", str(step.table.name))
     return ("step", f"step_{index}")
-
-
-def _emit_extra_tables_log(
-    extra_tables: list,
-    *,
-    emit_log: bool = True,
-    log_file: str | None = None,
-) -> None:
-    """
-    Emit structured log for extra tables (02-non-functional: Observability).
-
-    When tables exist in DB but not in model, surface them so the user sees drift remains.
-    """
-    if not extra_tables:
-        return
-    tables_data = [{"name": t.name, "schema": t.schema} for t in extra_tables]
-    record = {"event": "extra_tables", "tables": tables_data}
-    line = json.dumps(record) + "\n"
-    if emit_log:
-        sys.stdout.write(line)
-        sys.stdout.flush()
-    if log_file:
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(line)
-
-
-def _emit_skipped_log(
-    skipped: list[SkippedStep],
-    *,
-    emit_log: bool = True,
-    log_file: str | None = None,
-) -> None:
-    """
-    Emit structured log lines for skipped steps (02-non-functional: Observability).
-
-    When drift remains because a step could not be applied (e.g. SQLite constraint add
-    with allow_sqlite_table_rebuild=False), these are logged so the user knows.
-    """
-    for s in skipped:
-        record = {
-            "event": "skipped_step",
-            "description": s.description,
-            "reason": s.reason,
-            "table": str(s.table_name) if s.table_name else None,
-        }
-        line = json.dumps(record) + "\n"
-        if emit_log:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-        if log_file:
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(line)
 
 
 def _ensure_sqlite_memory_shared(url: str) -> str:
@@ -178,20 +163,6 @@ def _apply_plan(
     transaction/savepoint; on failure it is rolled back (01-functional).
     On any failure returns ConformError with target_objects set to the step that failed.
     """
-    if plan.skipped_steps:
-        _emit_skipped_log(
-            plan.skipped_steps,
-            emit_log=emit_log,
-            log_file=log_file,
-        )
-
-    if plan.extra_tables:
-        _emit_extra_tables_log(
-            plan.extra_tables,
-            emit_log=emit_log,
-            log_file=log_file,
-        )
-
     executable_steps = [s for s in plan.steps if isinstance(s, RebuildTableStep) or (s.sql and s.sql.strip())]
     if not executable_steps:
         return None
@@ -266,20 +237,6 @@ async def _apply_plan_async(
     Same semantics as _apply_plan. Emits skipped_steps, extra_tables, then runs each step
     (including RebuildTableStep for SQLite).
     """
-    if plan.skipped_steps:
-        _emit_skipped_log(
-            plan.skipped_steps,
-            emit_log=emit_log,
-            log_file=log_file,
-        )
-
-    if plan.extra_tables:
-        _emit_extra_tables_log(
-            plan.extra_tables,
-            emit_log=emit_log,
-            log_file=log_file,
-        )
-
     executable_steps = [s for s in plan.steps if isinstance(s, RebuildTableStep) or (s.sql and s.sql.strip())]
     if not executable_steps:
         return None
@@ -390,6 +347,8 @@ class DbConform:
         allow_shrink_column: bool = False,
         allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
+        allow_not_null_backfill: bool = False,
+        backfill_sentinel_timestamps: bool = False,
     ) -> ConformPlan | ConformError:
         """
         Compare models to the database using an open connection; does not close it.
@@ -407,6 +366,8 @@ class DbConform:
             db_schema = DatabaseSchema.from_connection(connection, self._target_schema)
             differ = SchemaDiffer()
             diff = differ.diff(model_schema, db_schema)
+            probe_names = tables_needing_row_probe(diff)
+            tables_with_rows = _probe_tables_with_rows_sync(connection, dialect, probe_names)
             builder = ConformPlanBuilder(
                 dialect,
                 allow_drop_extra_tables=allow_drop_extra_tables,
@@ -415,6 +376,9 @@ class DbConform:
                 allow_shrink_column=allow_shrink_column,
                 allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
+                allow_not_null_backfill=allow_not_null_backfill,
+                backfill_sentinel_timestamps=backfill_sentinel_timestamps,
+                tables_with_rows=tables_with_rows,
             )
             return builder.build(diff)
         except Exception as e:
@@ -434,6 +398,8 @@ class DbConform:
         allow_shrink_column: bool = False,
         allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
+        allow_not_null_backfill: bool = False,
+        backfill_sentinel_timestamps: bool = False,
     ) -> ConformPlan | ConformError:
         """
         Compare models to the database and return a conform plan (no apply).
@@ -444,7 +410,7 @@ class DbConform:
         conn = None
         try:
             conn = self._get_connection()
-            return self._compare_with_connection(
+            plan_or_error = self._compare_with_connection(
                 conn,
                 models,
                 allow_drop_extra_tables=allow_drop_extra_tables,
@@ -453,7 +419,13 @@ class DbConform:
                 allow_shrink_column=allow_shrink_column,
                 allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
+                allow_not_null_backfill=allow_not_null_backfill,
+                backfill_sentinel_timestamps=backfill_sentinel_timestamps,
             )
+            if isinstance(plan_or_error, ConformError):
+                return plan_or_error
+            drift_err = finalize_plan_drift(plan_or_error, emit_log=False)
+            return drift_err or plan_or_error
         finally:
             if self._own_connection and conn is not None:
                 conn.close()
@@ -470,20 +442,28 @@ class DbConform:
         allow_shrink_column: bool = False,
         allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
+        allow_not_null_backfill: bool = False,
+        backfill_sentinel_timestamps: bool = False,
         commit_per_step: bool = False,
         emit_log: bool = True,
         log_file: str | None = None,
+        raise_on_error: bool = True,
     ) -> ConformPlan | ConformError:
         """
         Compare models to the database and apply the resulting plan (run DDL and data ops).
 
         Same comparison options as compare(). On success, returns the ConformPlan that was
-        applied. On comparison or apply failure, returns ConformError. By default apply uses
-        a single transaction (all-or-nothing rollback on failure); set commit_per_step=True
-        to commit after each step (01-functional: Transaction behavior).
+        applied. On failure (error-severity drift or apply errors), raises ConformError by
+        default. Set raise_on_error=False to return ConformError instead of raising for
+        advanced inspection scenarios.
+
+        By default apply uses a single transaction (all-or-nothing rollback on failure);
+        set commit_per_step=True to commit after each step (01-functional: Transaction behavior).
         Applied steps are logged as JSON lines to stdout when emit_log is True (default).
         Set emit_log=False to suppress stdout. Pass log_file to also append to a file.
         No secrets are written to logs.
+
+        See docs/technical/design-decisions.md (DD-001) for error-handling rationale.
         """
         conn = None
         try:
@@ -497,9 +477,22 @@ class DbConform:
                 allow_shrink_column=allow_shrink_column,
                 allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
+                allow_not_null_backfill=allow_not_null_backfill,
+                backfill_sentinel_timestamps=backfill_sentinel_timestamps,
             )
             if isinstance(plan_or_error, ConformError):
+                if raise_on_error:
+                    raise plan_or_error
                 return plan_or_error
+            drift_err = finalize_plan_drift(
+                plan_or_error,
+                emit_log=emit_log,
+                log_file=log_file,
+            )
+            if drift_err is not None:
+                if raise_on_error:
+                    raise drift_err
+                return drift_err
             plan: ConformPlan = plan_or_error
             if not commit_per_step and not conn.in_transaction():
                 conn.commit()
@@ -511,16 +504,21 @@ class DbConform:
                 log_file=log_file,
             )
             if apply_err is not None:
+                if raise_on_error:
+                    raise apply_err
                 return apply_err
             if commit_per_step or self._own_connection or conn.in_transaction():
                 conn.commit()
             return plan
         except Exception as e:
             e.add_note("During connection or apply/conform.")
-            return ConformError(
+            err = ConformError(
                 target_objects=[("connection", "conform")],
                 messages=[str(e)],
             )
+            if raise_on_error:
+                raise err
+            return err
         finally:
             if self._own_connection and conn is not None:
                 conn.close()
@@ -568,6 +566,8 @@ class AsyncDbConform:
         allow_shrink_column: bool = False,
         allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
+        allow_not_null_backfill: bool = False,
+        backfill_sentinel_timestamps: bool = False,
     ) -> ConformPlan | ConformError:
         """
         Compare models to the database using an open async connection; does not close it.
@@ -585,6 +585,8 @@ class AsyncDbConform:
             db_schema = await DatabaseSchema.from_connection_async(connection, self._target_schema)
             differ = SchemaDiffer()
             diff = differ.diff(model_schema, db_schema)
+            probe_names = tables_needing_row_probe(diff)
+            tables_with_rows = await _probe_tables_with_rows_async(connection, dialect, probe_names)
             builder = ConformPlanBuilder(
                 dialect,
                 allow_drop_extra_tables=allow_drop_extra_tables,
@@ -593,6 +595,9 @@ class AsyncDbConform:
                 allow_shrink_column=allow_shrink_column,
                 allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
+                allow_not_null_backfill=allow_not_null_backfill,
+                backfill_sentinel_timestamps=backfill_sentinel_timestamps,
+                tables_with_rows=tables_with_rows,
             )
             return builder.build(diff)
         except Exception as e:
@@ -612,6 +617,8 @@ class AsyncDbConform:
         allow_shrink_column: bool = False,
         allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
+        allow_not_null_backfill: bool = False,
+        backfill_sentinel_timestamps: bool = False,
     ) -> ConformPlan | ConformError:
         """
         Compare models to the database and return a conform plan (no apply).
@@ -620,7 +627,7 @@ class AsyncDbConform:
         Returns ConformPlan with ordered steps and optional extra_tables; or ConformError on failure.
         """
         if self._async_connection is not None:
-            return await self._compare_with_connection(
+            plan_or_error = await self._compare_with_connection(
                 self._async_connection,
                 models,
                 allow_drop_extra_tables=allow_drop_extra_tables,
@@ -629,7 +636,13 @@ class AsyncDbConform:
                 allow_shrink_column=allow_shrink_column,
                 allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
+                allow_not_null_backfill=allow_not_null_backfill,
+                backfill_sentinel_timestamps=backfill_sentinel_timestamps,
             )
+            if isinstance(plan_or_error, ConformError):
+                return plan_or_error
+            drift_err = finalize_plan_drift(plan_or_error, emit_log=False)
+            return drift_err or plan_or_error
 
         url = self._credentials.get("url")
         if not url:
@@ -638,7 +651,7 @@ class AsyncDbConform:
         self._engine = create_async_engine(url)
         try:
             async with self._engine.connect() as conn:
-                return await self._compare_with_connection(
+                plan_or_error = await self._compare_with_connection(
                     conn,
                     models,
                     allow_drop_extra_tables=allow_drop_extra_tables,
@@ -647,7 +660,13 @@ class AsyncDbConform:
                     allow_shrink_column=allow_shrink_column,
                     allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                     report_extra_tables=report_extra_tables,
+                    allow_not_null_backfill=allow_not_null_backfill,
+                    backfill_sentinel_timestamps=backfill_sentinel_timestamps,
                 )
+                if isinstance(plan_or_error, ConformError):
+                    return plan_or_error
+                drift_err = finalize_plan_drift(plan_or_error, emit_log=False)
+                return drift_err or plan_or_error
         finally:
             await self._engine.dispose()
 
@@ -661,16 +680,24 @@ class AsyncDbConform:
         allow_shrink_column: bool = False,
         allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
+        allow_not_null_backfill: bool = False,
+        backfill_sentinel_timestamps: bool = False,
         commit_per_step: bool = False,
         emit_log: bool = True,
         log_file: str | None = None,
+        raise_on_error: bool = True,
     ) -> ConformPlan | ConformError:
         """
         Compare models to the database and apply the resulting plan (run DDL and data ops).
 
         Same comparison options as compare(). On success, returns the ConformPlan that was
-        applied. On comparison or apply failure, returns ConformError.
+        applied. On failure (error-severity drift or apply errors), raises ConformError by
+        default. Set raise_on_error=False to return ConformError instead of raising for
+        advanced inspection scenarios.
+
         Set emit_log=False to suppress apply-step logs to stdout.
+
+        See docs/technical/design-decisions.md (DD-001) for error-handling rationale.
         """
         if self._async_connection is not None:
             conn = self._async_connection
@@ -683,9 +710,22 @@ class AsyncDbConform:
                 allow_shrink_column=allow_shrink_column,
                 allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                 report_extra_tables=report_extra_tables,
+                allow_not_null_backfill=allow_not_null_backfill,
+                backfill_sentinel_timestamps=backfill_sentinel_timestamps,
             )
             if isinstance(plan_or_error, ConformError):
+                if raise_on_error:
+                    raise plan_or_error
                 return plan_or_error
+            drift_err = finalize_plan_drift(
+                plan_or_error,
+                emit_log=emit_log,
+                log_file=log_file,
+            )
+            if drift_err is not None:
+                if raise_on_error:
+                    raise drift_err
+                return drift_err
             plan = plan_or_error
             if not commit_per_step and not conn.in_transaction():
                 await conn.commit()
@@ -697,6 +737,8 @@ class AsyncDbConform:
                 log_file=log_file,
             )
             if apply_err is not None:
+                if raise_on_error:
+                    raise apply_err
                 return apply_err
             if commit_per_step or self._own_connection or conn.in_transaction():
                 await conn.commit()
@@ -718,9 +760,22 @@ class AsyncDbConform:
                     allow_shrink_column=allow_shrink_column,
                     allow_sqlite_table_rebuild=allow_sqlite_table_rebuild,
                     report_extra_tables=report_extra_tables,
+                    allow_not_null_backfill=allow_not_null_backfill,
+                    backfill_sentinel_timestamps=backfill_sentinel_timestamps,
                 )
                 if isinstance(plan_or_error, ConformError):
+                    if raise_on_error:
+                        raise plan_or_error
                     return plan_or_error
+                drift_err = finalize_plan_drift(
+                    plan_or_error,
+                    emit_log=emit_log,
+                    log_file=log_file,
+                )
+                if drift_err is not None:
+                    if raise_on_error:
+                        raise drift_err
+                    return drift_err
                 plan = plan_or_error
                 if not commit_per_step and not conn.in_transaction():
                     await conn.commit()
@@ -732,15 +787,20 @@ class AsyncDbConform:
                     log_file=log_file,
                 )
                 if apply_err is not None:
+                    if raise_on_error:
+                        raise apply_err
                     return apply_err
                 if commit_per_step or self._own_connection or conn.in_transaction():
                     await conn.commit()
                 return plan
         except Exception as e:
             e.add_note("During connection or apply/conform.")
-            return ConformError(
+            err = ConformError(
                 target_objects=[("connection", "conform")],
                 messages=[str(e)],
             )
+            if raise_on_error:
+                raise err
+            return err
         finally:
             await self._engine.dispose()

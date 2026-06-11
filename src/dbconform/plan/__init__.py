@@ -6,6 +6,7 @@ and docs/technical/02-architecture.md.
 """
 
 from dbconform.plan.builder import ConformPlanBuilder
+from dbconform.plan.skipped_types import SkippedCategory, SkippedSeverity
 from dbconform.plan.steps import (
     AlterTableStep,
     ConformPlan,
@@ -24,6 +25,8 @@ __all__ = [
     "DropTableStep",
     "RebuildTableStep",
     "SkippedStep",
+    "SkippedCategory",
+    "SkippedSeverity",
     "ConformPlan",
     "ConformPlanBuilder",
     "ConformStep",

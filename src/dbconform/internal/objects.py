@@ -52,6 +52,9 @@ class ColumnDef:
     comment: str | None = None
     # For PK identity / autoincrement; dialect-specific representation
     autoincrement: bool = False
+    # Opt-in backfill for ADD NOT NULL on non-empty tables (GitHub #12 Gap 1)
+    backfill_column: str | None = None
+    backfill_sql: str | None = None
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, ColumnDef):
@@ -63,6 +66,8 @@ class ColumnDef:
             and self.default == other.default
             and self.comment == other.comment
             and self.autoincrement == other.autoincrement
+            and self.backfill_column == other.backfill_column
+            and self.backfill_sql == other.backfill_sql
         )
 
     def __hash__(self) -> int:
@@ -74,6 +79,8 @@ class ColumnDef:
                 self.default,
                 self.comment,
                 self.autoincrement,
+                self.backfill_column,
+                self.backfill_sql,
             )
         )
 

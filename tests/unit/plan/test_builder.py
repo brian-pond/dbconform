@@ -172,6 +172,10 @@ def test_builder_removed_column_skipped_without_allow_drop_extra_columns() -> No
     assert isinstance(plan.skipped_steps[0], SkippedStep)
     assert "extra" in plan.skipped_steps[0].description
     assert "allow_drop_extra_columns=False" in plan.skipped_steps[0].reason
+    from dbconform.plan.skipped_types import SkippedCategory, SkippedSeverity
+
+    assert plan.skipped_steps[0].category == SkippedCategory.EXTRA_COLUMN
+    assert plan.skipped_steps[0].severity == SkippedSeverity.WARNING
 
 
 def test_builder_alter_shrink_skipped_without_allow_shrink_column() -> None:
@@ -344,11 +348,15 @@ def test_builder_modified_check_skipped_when_allow_drop_extra_constraints_false(
     plan = ConformPlanBuilder(
         PostgreSQLDialect(), allow_drop_extra_constraints=False
     ).build(diff)
+    from dbconform.plan.skipped_types import SkippedCategory, SkippedSeverity
+
     assert len(plan.steps) == 0
-    assert len(plan.skipped_steps) == 1
-    assert isinstance(plan.skipped_steps[0], SkippedStep)
-    assert "runstatus" in plan.skipped_steps[0].description
-    assert "allow_drop_extra_constraints=False" in plan.skipped_steps[0].reason
+    assert len(plan.skipped_steps) == 2
+    blocking = [s for s in plan.skipped_steps if s.severity == SkippedSeverity.ERROR]
+    assert len(blocking) == 1
+    assert blocking[0].category == SkippedCategory.MISSING_CONSTRAINT
+    assert "runstatus" in blocking[0].description
+    assert "allow_drop_extra_constraints=False" in blocking[0].reason
 
 
 def test_builder_modified_check_drop_then_add_when_allow_drop_extra_constraints_true() -> None:

@@ -4,7 +4,14 @@ All notable changes to the requirements docs are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Skipped-step severity:** `SkippedStep` carries `category` and `severity` (`warning` | `error`). Harmful drift (missing model columns/constraints; extra NOT NULL columns without DEFAULT) causes `compare()` / `apply_changes()` to return `ConformError`. Benign drift (nullable extras, column shrink blocked, extra constraints not dropped) emits stderr warnings only. See 01-functional (Skipped steps).
+- **NOT NULL backfill (GitHub #12 Gap 1):** Adding a NOT NULL column to a non-empty table is skipped by default; opt in with `allow_not_null_backfill=True` for multi-step add → UPDATE backfill → SET NOT NULL. Backfill via `Column.info["dbconform_backfill"]`, `Column.info["dbconform_backfill_sql"]`, column default, or — when `backfill_sentinel_timestamps=True` — sentinel date/timestamp literals. See 01-functional (Opt-in flags, Data operations).
+- **`ConformError.plan`:** When compare/apply fails due to blocking skipped steps, the built `ConformPlan` is attached on `ConformError.plan` for inspection without re-running compare. See 01-functional (Error handling).
+
 ### Fixed
+- **CHECK constraint DDL parentheses (GitHub #12 Gaps 2–3):** Emitted `ADD CHECK` / `CREATE TABLE` CHECK clauses wrap the full predicate so top-level `OR` and boolean `(A) = (B)` forms parse correctly on PostgreSQL.
+- **CHECK constraint compare normalization (GitHub #12 Gap 4):** Safe outer-paren stripping during compare (base dialect + PostgreSQL) avoids spurious drift when reflected text differs only by wrapping (e.g. `(col IN (...))` vs `col IN (...)`). PostgreSQL reflection uses ``pg_get_constraintdef`` instead of SQLAlchemy's truncated CHECK ``sqltext``.
 - **CHECK constraint updates with drops disabled:** When a same-name CHECK constraint expression changes (e.g. SQLAlchemy ``Enum`` member add/remove), compare reports removed + added checks. With ``allow_drop_extra_constraints=False``, the plan no longer emits ``ADD CONSTRAINT`` for the replacement (which caused PostgreSQL ``DuplicateObjectError``); the step is recorded in ``plan.skipped_steps`` instead. See 01-functional (Opt-in flags) (GitHub #11).
 - **TypeDecorator columns:** Model-side schema now resolves ``TypeDecorator`` subclasses via ``load_dialect_impl()`` using the conform target dialect, so dialect-specific types (e.g. ``UtcDateTime`` → ``TIMESTAMPTZ`` on PostgreSQL, ``VARCHAR(32)`` on SQLite) no longer fall back to SQLite compilation and produce wrong DDL (GitHub #10).
 - **PostgreSQL ALTER COLUMN type casts:** Cross-type alters that PostgreSQL cannot auto-cast (e.g. ``VARCHAR`` → ``TIMESTAMPTZ`` when migrating tables created with wrong types before #10) now emit an explicit ``USING`` clause with the appropriate cast.
@@ -25,6 +32,7 @@ All notable changes to the requirements docs are documented here.
 - **emit_log option:** `apply_changes()` accepts `emit_log=False` to suppress JSON-line logs to stdout. Useful when the caller manages logging. `log_file` still appends when provided. See 02-non-functional (Observability).
 
 ### Changed
+- **BREAKING: `apply_changes()` error handling:** `apply_changes()` now **raises** `ConformError` by default when error-severity skipped steps prevent conformity (rather than returning it). This reflects the execution semantics: "make it conform" should interrupt flow on failure. `compare()` continues to **return** `ConformError` (analysis operation; drift is expected). Users requiring the old return behavior for `apply_changes()` can set `raise_on_error=False`. See 01-functional (Error handling) and docs/technical/design-decisions.md (DD-001).
 - **ConformError:** Now inherits from `Exception`, allowing `raise X from conform_error` and `except ConformError`. The API still returns it as a value; `isinstance(result, ConformError)` continues to work as before.
 
 ### Added (earlier)

@@ -15,7 +15,7 @@ except PackageNotFoundError:
 
 from dbconform.conform import AsyncDbConform, DbConform
 from dbconform.errors import ConformError
-from dbconform.plan.steps import ConformPlan, RebuildTableStep
+from dbconform.plan import ConformPlan, RebuildTableStep, SkippedCategory, SkippedSeverity, SkippedStep
 
 __all__ = [
     "AsyncDbConform",
@@ -23,4 +23,7 @@ __all__ = [
     "ConformError",
     "ConformPlan",
     "RebuildTableStep",
+    "SkippedStep",
+    "SkippedCategory",
+    "SkippedSeverity",
 ]

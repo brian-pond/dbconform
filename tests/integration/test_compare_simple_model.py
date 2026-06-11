@@ -525,23 +525,27 @@ def test_apply_changes_sqlite_add_unique_skip_when_rebuild_disabled(
         SimpleTableWithUnique,
         allow_sqlite_table_rebuild=False,
     )
-    assert not isinstance(result, dbconform.ConformError)
-    assert len(result.skipped_steps) >= 1
-    assert any("unique" in s.description.lower() for s in result.skipped_steps)
+    assert isinstance(result, dbconform.ConformError)
+    assert result.plan is not None
+    assert len(result.plan.skipped_steps) >= 1
+    assert any("unique" in s.description.lower() for s in result.plan.skipped_steps)
 
     apply_result = conform.apply_changes(
         SimpleTableWithUnique,
         allow_sqlite_table_rebuild=False,
+        raise_on_error=False,
     )
-    assert not isinstance(apply_result, dbconform.ConformError)
-    assert len(apply_result.skipped_steps) >= 1
+    assert isinstance(apply_result, dbconform.ConformError)
+    assert apply_result.plan is not None
+    assert len(apply_result.plan.skipped_steps) >= 1
 
 
 def test_apply_changes_apply_failure_returns_conform_error_with_target_objects_postgres(
     empty_postgres_db: tuple[str, str],
 ) -> None:
     """When a plan step fails during apply (e.g. SET NOT NULL with existing NULLs),
-    apply_changes returns ConformError with target_objects (01-functional: Error handling)."""
+    apply_changes raises ConformError (or returns with raise_on_error=False) with target_objects
+    (01-functional: Error handling)."""
     url, schema = empty_postgres_db
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -558,7 +562,7 @@ def test_apply_changes_apply_failure_returns_conform_error_with_target_objects_p
 
     # SimpleTable has name NOT NULL; DB has NULL in name. ALTER COLUMN SET NOT NULL fails.
     conform = dbconform.DbConform(credentials={"url": url}, target_schema=schema)
-    result = conform.apply_changes(SimpleTable)
+    result = conform.apply_changes(SimpleTable, raise_on_error=False)
     assert isinstance(result, dbconform.ConformError)
     assert len(result.messages) >= 1
     assert len(result.target_objects) >= 1
@@ -629,13 +633,13 @@ def test_apply_changes_log_file_written(empty_db: tuple[str, str | None], tmp_pa
 
 
 def test_apply_changes_invalid_url_returns_conform_error() -> None:
-    """Invalid or unreachable DB URL yields ConformError with target_objects
+    """Invalid or unreachable DB URL yields ConformError (raised or returned) with target_objects
     (01-functional: Error handling)."""
     conform = dbconform.DbConform(
         credentials={"url": "postgresql://localhost:19999/nonexistent_db"},
         target_schema="public",
     )
-    result = conform.apply_changes(SimpleTable)
+    result = conform.apply_changes(SimpleTable, raise_on_error=False)
     assert isinstance(result, dbconform.ConformError)
     assert len(result.messages) >= 1
     assert len(result.target_objects) >= 1

@@ -241,3 +241,51 @@ def test_postgresql_normalize_reflected_table_normalizes_bool_default_case() -> 
     )
     normalized = dialect.normalize_reflected_table(table)
     assert normalized.columns[0].default == "FALSE"
+
+
+def test_postgresql_normalize_or_check_reflected_form() -> None:
+    """Reflected OR CHECK with casts/extra parens matches model (GitHub #12 Gap 4)."""
+    dialect = PostgreSQLDialect()
+    table = TableDef(name=QualifiedName("broker", "broker_message"))
+    model_expr = (
+        "(destination = 'general' AND bucket_id IS NULL) OR "
+        "(destination = 'bucket' AND bucket_id IS NOT NULL)"
+    )
+    reflected = (
+        "(((destination = 'general'::character varying) AND (bucket_id IS NULL)) OR "
+        "((destination = 'bucket'::character varying) AND (bucket_id IS NOT NULL)))"
+    )
+    assert dialect._normalize_check_expression(model_expr, table) == dialect._normalize_check_expression(
+        reflected, table
+    )
+
+
+def test_postgresql_normalize_boolean_equality_check_reflected_form() -> None:
+    """Reflected boolean-equality CHECK matches model (GitHub #12 Gap 3/4)."""
+    dialect = PostgreSQLDialect()
+    table = TableDef(name=QualifiedName("broker", "broker_worker"))
+    model_expr = "(dispatch_role = 'system') = (NOT is_assignable)"
+    reflected = "((dispatch_role = 'system'::character varying) = NOT is_assignable)"
+    assert dialect._normalize_check_expression(model_expr, table) == dialect._normalize_check_expression(
+        reflected, table
+    )
+
+
+def test_postgresql_normalize_reflected_table_preserves_backfill_hints() -> None:
+    """Column.info backfill hints survive PostgreSQL normalize_reflected_table."""
+    dialect = PostgreSQLDialect()
+    table = TableDef(
+        name=QualifiedName("broker", "broker_bucket"),
+        columns=(
+            ColumnDef("created_at", "TIMESTAMPTZ", nullable=False),
+            ColumnDef(
+                "updated_at",
+                "TIMESTAMPTZ",
+                nullable=False,
+                backfill_column="created_at",
+            ),
+        ),
+    )
+    normalized = dialect.normalize_reflected_table(table)
+    updated = next(c for c in normalized.columns if c.name == "updated_at")
+    assert updated.backfill_column == "created_at"

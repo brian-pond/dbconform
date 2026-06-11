@@ -7,6 +7,11 @@ docs/requirements/01-functional.md (Error handling).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dbconform.plan.steps import ConformPlan
+
 
 class ConformError(Exception):
     """
@@ -18,6 +23,8 @@ class ConformError(Exception):
 
     target_objects: list of (object_type, identifier) e.g. ("table", "public.foo").
     messages: human-readable reason(s). One entry per object or a single summary.
+    plan: when failure is due to blocking skipped steps, the built ConformPlan
+        (steps, skipped_steps, extra_tables) for inspection without re-running compare.
     """
 
     def __init__(
@@ -25,9 +32,11 @@ class ConformError(Exception):
         *,
         target_objects: list[tuple[str, str]] | None = None,
         messages: list[str] | None = None,
+        plan: ConformPlan | None = None,
     ) -> None:
         self.target_objects = target_objects or []
         self.messages = messages or []
+        self.plan = plan
         super().__init__(self._format())
 
     def _format(self) -> str:

@@ -125,12 +125,16 @@ else:
 ### Apply changes
 
 ```python
-result = conform.apply_changes([Product, Cart])  # ConformPlan | ConformError
-
-if isinstance(result, ConformError):
-    print("Apply failed:", result.messages)
-else:
-    print(f"Applied {len(result.steps)} change(s). Schema is conformant.")
+# apply_changes() raises ConformError by default on failure
+try:
+    result = conform.apply_changes([Product, Cart])  # ConformPlan on success
+    print(f"Applied {len(result.steps)} change(s).")
+    if result.skipped_steps:
+        print(f"Warning: {len(result.skipped_steps)} skipped step(s) — see stderr from apply.")
+except ConformError as e:
+    print("Conform failed:", e.messages)  # includes blocking skipped steps
+    if e.plan:
+        e.plan.print_summary()  # inspect partial plan and skipped steps
 ```
 
 By default all steps run in a **single transaction** — any failure rolls back everything. Set `commit_per_step=True` to commit after each step so prior steps persist if a later one fails.
@@ -203,9 +207,22 @@ Steps are emitted in **dependency order** — e.g., a table is created before an
 
 **Column defaults:** Python scalar defaults on SQLAlchemy/SQLModel columns (e.g. `default=date(1970, 1, 1)` on a `DATE` column) are emitted as properly quoted literals so the database interprets them correctly.
 
-**NOT NULL on a column with existing NULLs:** If the model defines a column default, dbconform backfills NULLs automatically before adding the `NOT NULL` constraint. If there is no default, it returns a `ConformError` — backfill the column manually first, then retry.
+**ADD NOT NULL column on a non-empty table:** By default the step is **skipped** (see `plan.skipped_steps`) so a single invalid `ADD COLUMN … NOT NULL` is never emitted. Opt in with `allow_not_null_backfill=True` to run a multi-step plan: add nullable → `UPDATE` backfill → `SET NOT NULL`. Backfill sources (stateless, no built-in column mappings): `Column.info["dbconform_backfill_sql"]`, `Column.info["dbconform_backfill"]` (peer column on the same table), column `server_default` / default, or — when `backfill_sentinel_timestamps=True` — `1900-01-01` for date/timestamp types.
 
 **SQLite constraint limits:** SQLite cannot add CHECK, UNIQUE, or FOREIGN KEY constraints via `ALTER TABLE`. By default (`allow_sqlite_table_rebuild=True`), dbconform rebuilds the table (create new → copy data → drop old → rename), preserving all data and indexes. Set `allow_sqlite_table_rebuild=False` to skip rebuilds; skipped steps appear in `plan.skipped_steps`.
+
+**Skipped steps and drift severity:** Every skipped step and every extra table emits a **warning on stderr** so operators see remaining drift. Each `SkippedStep` has `category` and `severity` (`warning` or `error`). When any error-severity skip remains (harmful asymmetry): `compare()` **returns** `ConformError`; `apply_changes()` **raises** `ConformError` (or returns it with `raise_on_error=False`). No DDL is applied when error-severity skips exist.
+
+| Situation | Severity |
+|-----------|----------|
+| Extra DB column, nullable or with DEFAULT | `warning` |
+| Extra DB column, NOT NULL without DEFAULT | `error` |
+| Model column/constraint missing in DB (blocked add, NOT NULL backfill, SQLite rebuild off, …) | `error` |
+| Extra DB constraint/index not dropped (`allow_drop_extra_constraints=False`) | `warning` |
+| Column shrink blocked | `warning` |
+| Extra tables (in DB, not in models) | warning on stderr only |
+
+Inspect `result.plan.skipped_steps`, `result.plan.blocking_skipped_steps()`, or `result.plan.has_blocking_skipped_steps()` when `isinstance(result, ConformError)` and `result.plan` is set; otherwise use the returned `ConformPlan` directly.
 
 **Future (not yet in scope):** sequences, triggers, enums.
 
@@ -222,12 +239,15 @@ Steps are emitted in **dependency order** — e.g., a table is created before an
 | `allow_drop_extra_constraints` | `True` | DROP CONSTRAINT / DROP INDEX for removed constraints |
 | `allow_shrink_column` | `False` | ALTER COLUMN that reduces size (may truncate data) |
 | `allow_sqlite_table_rebuild` | `True` | SQLite table rebuild for CHECK/UNIQUE/FK changes |
+| `allow_not_null_backfill` | `False` | Multi-step ADD NOT NULL on tables that already have rows |
+| `backfill_sentinel_timestamps` | `False` | Use `1900-01-01` sentinel when no other backfill source applies |
 | `report_extra_tables` | `True` | Populate `plan.extra_tables` with tables in DB but not in your models |
 
 `apply_changes()` additional flags:
 
 | Flag | Default | What it controls |
 |---|:---:|---|
+| `raise_on_error` | `True` | Raise `ConformError` on failure; set `False` to return it for programmatic inspection |
 | `commit_per_step` | `False` | Commit after each step (partial progress persists on failure) |
 | `emit_log` | `True` | JSON-line log to stdout for each applied step |
 | `log_file` | `None` | Path to also append logs to a file |
@@ -244,17 +264,49 @@ result = conform.apply_changes(
 
 ---
 
-## Errors
+## Error Handling
 
-`ConformError` is **returned as a value**, not raised. Check for it with `isinstance`:
+### `apply_changes()` — Raises by default
+
+`apply_changes()` **raises** `ConformError` when conformity fails (error-severity skipped steps or apply failures). This reflects execution semantics: when you command "make it conform," failure should interrupt flow.
 
 ```python
-if isinstance(result, ConformError):
-    print(result.messages)        # list[str] — what went wrong
-    print(result.target_objects)  # list of (object_type, name) e.g. [("table", "public.foo")]
+from dbconform import ConformError
+
+try:
+    plan = conform.apply_changes([Product, Cart])
+    print(f"Success: {len(plan.steps)} step(s) applied")
+except ConformError as e:
+    print("Conformity failed:", e.messages)
+    print("Affected objects:", e.target_objects)
+    if e.plan:
+        e.plan.print_summary()  # inspect partial plan and blocking skipped steps
 ```
 
-`ConformError` also inherits from `Exception`, so `raise X from result` and `except ConformError` work if you prefer the exception pattern.
+**Advanced: return instead of raise**
+
+For programmatic inspection (e.g. CI pipelines analyzing drift), set `raise_on_error=False`:
+
+```python
+result = conform.apply_changes([Product, Cart], raise_on_error=False)
+if isinstance(result, ConformError):
+    # Analyze blocking issues without exception handling
+    for step in result.plan.skipped_steps:
+        log_skipped_step(step.category, step.severity, step.reason)
+```
+
+### `compare()` — Always returns
+
+`compare()` is an **analysis operation**. Drift detection is the purpose, so it always **returns** `ConformPlan | ConformError` without raising:
+
+```python
+result = conform.compare([Product, Cart])
+if isinstance(result, ConformError):
+    print("Blocking issues found:", result.messages)
+    result.plan.print_summary()
+else:
+    print(f"Would apply {len(result.steps)} step(s)")
+```
 
 ---
 

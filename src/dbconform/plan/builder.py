@@ -20,8 +20,11 @@ from dbconform.plan.steps import (
     CreateTableStep,
     DropTableStep,
     RebuildTableStep,
-    SkippedStep,
+
 )
+from dbconform.plan.not_null_backfill import build_add_not_null_column_sql
+from dbconform.plan.skipped_policy import make_skipped_step
+from dbconform.plan.skipped_types import SkippedCategory, SkippedSeverity, extra_column_severity
 from dbconform.sql_dialect.base import Dialect
 
 
@@ -81,6 +84,9 @@ class ConformPlanBuilder:
         allow_shrink_column: bool = False,
         allow_sqlite_table_rebuild: bool = True,
         report_extra_tables: bool = True,
+        allow_not_null_backfill: bool = False,
+        backfill_sentinel_timestamps: bool = False,
+        tables_with_rows: frozenset[QualifiedName] | None = None,
     ) -> None:
         self.dialect = dialect
         self.allow_drop_extra_tables = allow_drop_extra_tables
@@ -89,6 +95,9 @@ class ConformPlanBuilder:
         self.allow_shrink_column = allow_shrink_column
         self.allow_sqlite_table_rebuild = allow_sqlite_table_rebuild
         self.report_extra_tables = report_extra_tables
+        self.allow_not_null_backfill = allow_not_null_backfill
+        self.backfill_sentinel_timestamps = backfill_sentinel_timestamps
+        self.tables_with_rows = tables_with_rows or frozenset()
 
     def build(self, diff: DiffResult) -> ConformPlan:
         """Produce an ordered ConformPlan from the diff."""
@@ -172,6 +181,47 @@ class ConformPlanBuilder:
                 ck.name for ck in table_diff.removed_checks if ck.name is not None
             }
 
+            if not self.allow_drop_extra_constraints:
+                for idx in table_diff.removed_indexes:
+                    skipped_steps.append(
+                        make_skipped_step(
+                            description=f"Drop index {idx.name} on {name}",
+                            reason="Index drop blocked: allow_drop_extra_constraints=False",
+                            table_name=name,
+                            category=SkippedCategory.EXTRA_CONSTRAINT,
+                            severity=SkippedSeverity.WARNING,
+                        )
+                    )
+                for u in table_diff.removed_unique:
+                    skipped_steps.append(
+                        make_skipped_step(
+                            description=f"Drop unique constraint on {name}",
+                            reason="Unique constraint drop blocked: allow_drop_extra_constraints=False",
+                            table_name=name,
+                            category=SkippedCategory.EXTRA_CONSTRAINT,
+                            severity=SkippedSeverity.WARNING,
+                        )
+                    )
+                for fk in table_diff.removed_foreign_keys:
+                    skipped_steps.append(
+                        make_skipped_step(
+                            description=f"Drop foreign key on {name}",
+                            reason="Foreign key drop blocked: allow_drop_extra_constraints=False",
+                            table_name=name,
+                            category=SkippedCategory.EXTRA_CONSTRAINT,
+                            severity=SkippedSeverity.WARNING,
+                        )
+                    )
+                for ck in table_diff.removed_checks:
+                    skipped_steps.append(
+                        make_skipped_step(
+                            description=f"Drop check constraint on {name}",
+                            reason="Check constraint drop blocked: allow_drop_extra_constraints=False",
+                            table_name=name,
+                            category=SkippedCategory.EXTRA_CONSTRAINT,
+                            severity=SkippedSeverity.WARNING,
+                        )
+                    )
             if self.allow_drop_extra_constraints:
                 for idx in table_diff.removed_indexes:
                     sql = self.dialect.drop_index_sql(idx.name, name)
@@ -227,14 +277,37 @@ class ConformPlanBuilder:
             else:
                 for col in table_diff.removed_columns:
                     skipped_steps.append(
-                        SkippedStep(
+                        make_skipped_step(
                             description=f"Drop column `{col.name}` from `{name}`",
                             reason="Column drop blocked: allow_drop_extra_columns=False",
                             table_name=name,
+                            category=SkippedCategory.EXTRA_COLUMN,
+                            severity=extra_column_severity(col),
                         )
                     )
             for col in table_diff.added_columns:
-                sql = self.dialect.add_column_sql(name, col)
+                table_has_rows = name in self.tables_with_rows
+                sql, skip_reason = build_add_not_null_column_sql(
+                    self.dialect,
+                    name,
+                    col,
+                    table_diff.new_table,
+                    table_has_rows=table_has_rows,
+                    allow_not_null_backfill=self.allow_not_null_backfill,
+                    backfill_sentinel_timestamps=self.backfill_sentinel_timestamps,
+                )
+                if skip_reason is not None:
+                    skipped_steps.append(
+                        make_skipped_step(
+                            description=f"Add column {col.name} to {name}",
+                            reason=skip_reason,
+                            table_name=name,
+                            category=SkippedCategory.MISSING_COLUMN,
+                            severity=SkippedSeverity.ERROR,
+                        )
+                    )
+                    continue
+                assert sql is not None
                 steps.append(
                     AlterTableStep(
                         description=f"Add column {col.name} to {name}",
@@ -248,10 +321,12 @@ class ConformPlanBuilder:
                 if alter_sql:
                     if self.dialect.would_shrink(old_col, new_col) and not self.allow_shrink_column:
                         skipped_steps.append(
-                            SkippedStep(
+                            make_skipped_step(
                                 description=f"Alter column {new_col.name} on {name}",
                                 reason="Column shrink blocked: allow_shrink_column=False",
                                 table_name=name,
+                                category=SkippedCategory.COLUMN_SHRINK,
+                                severity=SkippedSeverity.WARNING,
                             )
                         )
                         continue
@@ -266,10 +341,12 @@ class ConformPlanBuilder:
             for u in table_diff.added_unique:
                 if self.dialect.name == "sqlite":
                     skipped_steps.append(
-                        SkippedStep(
+                        make_skipped_step(
                             description=f"Add unique constraint on {name}",
                             reason=_SKIP_REASON,
                             table_name=name,
+                            category=SkippedCategory.MISSING_CONSTRAINT,
+                            severity=SkippedSeverity.ERROR,
                         )
                     )
                 else:
@@ -285,10 +362,12 @@ class ConformPlanBuilder:
             for fk in table_diff.added_foreign_keys:
                 if self.dialect.name == "sqlite":
                     skipped_steps.append(
-                        SkippedStep(
+                        make_skipped_step(
                             description=f"Add foreign key on {name}",
                             reason=_SKIP_REASON,
                             table_name=name,
+                            category=SkippedCategory.MISSING_CONSTRAINT,
+                            severity=SkippedSeverity.ERROR,
                         )
                     )
                 else:
@@ -307,22 +386,26 @@ class ConformPlanBuilder:
                     and not self.allow_drop_extra_constraints
                 ):
                     skipped_steps.append(
-                        SkippedStep(
+                        make_skipped_step(
                             description=f"Modify check constraint {ck.name} on {name}",
                             reason=(
                                 "Check constraint update blocked: "
                                 "allow_drop_extra_constraints=False"
                             ),
                             table_name=name,
+                            category=SkippedCategory.MISSING_CONSTRAINT,
+                            severity=SkippedSeverity.ERROR,
                         )
                     )
                     continue
                 if self.dialect.name == "sqlite":
                     skipped_steps.append(
-                        SkippedStep(
+                        make_skipped_step(
                             description=f"Add check constraint on {name}",
                             reason=_SKIP_REASON,
                             table_name=name,
+                            category=SkippedCategory.MISSING_CONSTRAINT,
+                            severity=SkippedSeverity.ERROR,
                         )
                     )
                 else:

@@ -346,6 +346,13 @@ def _extract_table_def(
             pk_col_name=pk_col_name,
             integer_type_names=_integer_type_names,
         )
+        col_info = getattr(col, "info", None) or {}
+        backfill_column = col_info.get("dbconform_backfill")
+        backfill_sql = col_info.get("dbconform_backfill_sql")
+        if backfill_column is not None:
+            backfill_column = str(backfill_column).strip() or None
+        if backfill_sql is not None:
+            backfill_sql = str(backfill_sql).strip() or None
         columns.append(
             ColumnDef(
                 name=col.name,
@@ -354,6 +361,8 @@ def _extract_table_def(
                 default=default,
                 comment=comment,
                 autoincrement=autoincrement,
+                backfill_column=backfill_column,
+                backfill_sql=backfill_sql,
             )
         )
 

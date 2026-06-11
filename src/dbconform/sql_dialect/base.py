@@ -20,6 +20,11 @@ from dbconform.internal.objects import (
     TableDef,
     UniqueDef,
 )
+from dbconform.sql_dialect.check_expression import (
+    format_check_expression_for_ddl,
+    normalize_check_expression_text,
+    strip_redundant_comparison_parens,
+)
 
 
 class Dialect(ABC):
@@ -134,7 +139,8 @@ class Dialect(ABC):
         """Generate ALTER TABLE ... ADD CHECK."""
         name_part = f"CONSTRAINT {self._quote(check.name)} " if check.name else ""
         tbl = self.qualified_table(table_name)
-        return f"ALTER TABLE {tbl} ADD {name_part}CHECK ({check.expression})"
+        body = format_check_expression_for_ddl(check.expression)
+        return f"ALTER TABLE {tbl} ADD {name_part}CHECK ({body})"
 
     def _format_index_expr(self, expr: str) -> str:
         """Format one index column expression for CREATE INDEX DDL."""
@@ -252,11 +258,45 @@ class Dialect(ABC):
             return int(m.group(1))
         return None
 
+    def _normalize_check_expression(self, expression: str, table_def: TableDef) -> str:
+        """
+        Canonicalize CHECK text for stable compare (whitespace + safe outer parens).
+
+        Dialects override for backend-specific forms (e.g. PostgreSQL Enum ANY → IN).
+        See GitHub #12 Gap 4.
+        """
+        _ = table_def
+        expr = normalize_check_expression_text(expression)
+        return strip_redundant_comparison_parens(expr)
+
+    def _normalize_check_def(self, check: CheckDef, table_def: TableDef) -> CheckDef:
+        """Normalize one CHECK constraint for stable comparison."""
+        return CheckDef(
+            name=check.name,
+            expression=self._normalize_check_expression(check.expression, table_def),
+        )
+
     def normalize_reflected_table(self, table_def: TableDef) -> TableDef:
         """
         Optionally normalize a reflected TableDef so it compares equal to model-side internal schema.
 
-        Default: return table_def unchanged. PostgreSQL overrides to normalize
+        Default: normalize CHECK expressions only. PostgreSQL overrides to also normalize
         SERIAL/sequence columns (nextval default → default=None, autoincrement=True).
         """
-        return table_def
+        if not table_def.check_constraints:
+            return table_def
+        new_checks = tuple(
+            self._normalize_check_def(ck, table_def) for ck in table_def.check_constraints
+        )
+        if new_checks == table_def.check_constraints:
+            return table_def
+        return TableDef(
+            name=table_def.name,
+            columns=table_def.columns,
+            primary_key=table_def.primary_key,
+            unique_constraints=table_def.unique_constraints,
+            foreign_keys=table_def.foreign_keys,
+            check_constraints=new_checks,
+            indexes=table_def.indexes,
+            comment=table_def.comment,
+        )

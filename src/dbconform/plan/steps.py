@@ -19,6 +19,7 @@ from dbconform.internal.objects import (
     TableDef,
     UniqueDef,
 )
+from dbconform.plan.skipped_types import SkippedCategory, SkippedSeverity
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,11 +30,15 @@ class SkippedStep:
     description: human-readable step description (e.g. "Add check constraint on X")
     reason: why it was skipped (e.g. "SQLite does not support ADD CONSTRAINT; allow_sqlite_table_rebuild=False")
     table_name: table affected, if applicable.
+    category: drift class for policy and logging.
+    severity: ``warning`` (benign drift) or ``error`` (harmful to ORM traffic).
     """
 
     description: str
     reason: str
     table_name: QualifiedName | None = None
+    category: SkippedCategory = SkippedCategory.UNSPECIFIED
+    severity: SkippedSeverity = SkippedSeverity.WARNING
 
 
 @dataclass(slots=True)
@@ -153,11 +158,24 @@ class ConformPlan:
             for name in self.extra_tables:
                 lines.append(f"- {name}")
         if self.skipped_steps:
-            lines.append("Skipped steps:")
+            errors = sum(1 for s in self.skipped_steps if s.severity == SkippedSeverity.ERROR)
+            warnings = len(self.skipped_steps) - errors
+            lines.append(f"Skipped steps: {errors} error(s), {warnings} warning(s)")
             for s in self.skipped_steps:
                 table = f" on {s.table_name}" if s.table_name is not None else ""
-                lines.append(f"- {s.description}{table} (reason: {s.reason})")
+                lines.append(
+                    f"- [{s.severity.value}] {s.description}{table} "
+                    f"({s.category.value}: {s.reason})"
+                )
         return "\n".join(lines)
+
+    def blocking_skipped_steps(self) -> list[SkippedStep]:
+        """Skipped steps with error severity — conform must not report success."""
+        return [s for s in self.skipped_steps if s.severity == SkippedSeverity.ERROR]
+
+    def has_blocking_skipped_steps(self) -> bool:
+        """True when harmful drift remains after planning."""
+        return bool(self.blocking_skipped_steps())
 
     def print_summary(self, file: TextIO | None = None) -> None:
         """

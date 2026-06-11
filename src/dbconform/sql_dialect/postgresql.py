@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import re
 
+from sqlalchemy.engine import Connection
+from sqlalchemy import text
+
 from dbconform.internal.objects import (
     CheckDef,
     ColumnDef,
@@ -20,10 +23,44 @@ from dbconform.internal.objects import (
 )
 from dbconform.internal.types import CanonicalType
 from dbconform.sql_dialect.base import Dialect
+from dbconform.sql_dialect.check_expression import (
+    extract_check_body_from_pg_constraintdef,
+    format_check_expression_for_ddl,
+    normalize_check_expression_text,
+    normalize_or_and_group_parens,
+    strip_outer_parens,
+    strip_redundant_comparison_parens,
+)
 
 
 class PostgreSQLDialect(Dialect):
     """DDL generation for PostgreSQL."""
+
+    def fetch_check_expressions_from_catalog(
+        self,
+        connection: Connection,
+        table_name: QualifiedName,
+    ) -> dict[str, str]:
+        """
+        Return CHECK constraint bodies from ``pg_get_constraintdef`` keyed by name.
+
+        SQLAlchemy reflection truncates complex CHECK text (GitHub #12 Gap 4).
+        """
+        schema = table_name.schema or "public"
+        rows = connection.execute(
+            text(
+                "SELECT c.conname, pg_get_constraintdef(c.oid) "
+                "FROM pg_constraint c "
+                "JOIN pg_class t ON c.conrelid = t.oid "
+                "JOIN pg_namespace n ON t.relnamespace = n.oid "
+                "WHERE c.contype = 'c' AND n.nspname = :schema AND t.relname = :table"
+            ),
+            {"schema": schema, "table": table_name.name},
+        ).all()
+        return {
+            str(name): extract_check_body_from_pg_constraintdef(str(constraintdef))
+            for name, constraintdef in rows
+        }
 
     @property
     def name(self) -> str:
@@ -107,7 +144,8 @@ class PostgreSQLDialect(Dialect):
             parts.append(f"{name_part}FOREIGN KEY ({cols}) REFERENCES {ref} ({ref_cols})")
         for ck in table.check_constraints:
             name_part = f"CONSTRAINT {self._quote(ck.name)} " if ck.name else ""
-            parts.append(f"{name_part}CHECK ({ck.expression})")
+            body = format_check_expression_for_ddl(ck.expression)
+            parts.append(f"{name_part}CHECK ({body})")
         body = ", ".join(parts)
         tbl = self.qualified_table(table.name)
         return f"CREATE TABLE {tbl} ({body})"
@@ -370,6 +408,62 @@ class PostgreSQLDialect(Dialect):
         literals = ", ".join(f"'{v}'" for v in values)
         return f"{col} IN ({literals})"
 
+    def _strip_pg_type_casts(self, expression: str) -> str:
+        """Remove PostgreSQL ``::type`` casts from CHECK text for stable compare (GitHub #12)."""
+        expr = expression
+        expr = re.sub(
+            r"('(?:[^']|'')*')::(?:character\s+varying|varchar(?:\(\d+\))?|text)",
+            r"\1",
+            expr,
+            flags=re.IGNORECASE,
+        )
+        expr = re.sub(
+            r"\((\w+)\)::(?:character\s+varying|varchar(?:\(\d+\))?|text|boolean|integer|bigint|"
+            r"smallint|timestamptz|timestamp(?:\s+with(?:out)?\s+time\s+zone)?|date)(?:\[\])?",
+            r"\1",
+            expr,
+            flags=re.IGNORECASE,
+        )
+        expr = re.sub(
+            r"(\w+)::(?:character\s+varying|varchar(?:\(\d+\))?|text|boolean|integer|bigint|"
+            r"smallint|timestamptz|timestamp(?:\s+with(?:out)?\s+time\s+zone)?|date)(?:\[\])?",
+            r"\1",
+            expr,
+            flags=re.IGNORECASE,
+        )
+        return expr
+
+    def _normalize_pg_identifier_parens(self, expression: str) -> str:
+        """Normalize ``(col) =`` / ``AND (col)`` forms PostgreSQL adds in CHECK text."""
+        expr = expression
+        expr = re.sub(r"\((\w+)\)\s*=", r"\1 =", expr)
+        expr = re.sub(r"\s+AND\s+\((\w+)\)\s", r" AND \1 ", expr, flags=re.IGNORECASE)
+        expr = re.sub(r"\((\w+)\)\s+AND\s+", r"\1 AND ", expr, flags=re.IGNORECASE)
+        return expr
+
+    def _normalize_check_not_syntax(self, expression: str) -> str:
+        """Normalize ``= NOT col`` to ``= (NOT col)`` for stable compare."""
+        return re.sub(r"=\s*NOT\s+(\w+)\b", r"= (NOT \1)", expression, flags=re.IGNORECASE)
+
+    def _normalize_enum_any_to_in(self, expr: str, table_def: TableDef) -> str | None:
+        """Normalize PostgreSQL Enum ``col = ANY (ARRAY[...])`` to ``col IN (...)``."""
+        match = re.match(r"^(\w+)\s*=\s*ANY\s*\(\s*(.+)\s*\)$", expr, re.IGNORECASE)
+        if not match:
+            return None
+        col = self._strip_table_qualified_column(match.group(1), table_def)
+        inner = strip_outer_parens(match.group(2).strip())
+        if inner.upper().endswith("::TEXT[]"):
+            inner = inner[:-8].strip()
+        inner = strip_outer_parens(inner)
+        if not inner.upper().startswith("ARRAY["):
+            return None
+        values_content = inner[6:-1]
+        values = self._parse_quoted_string_literal_list(values_content)
+        if values is None:
+            return None
+        literals = ", ".join(f"'{v}'" for v in values)
+        return f"{col} IN ({literals})"
+
     def _normalize_check_expression(self, expression: str, table_def: TableDef) -> str:
         """
         Normalize CHECK constraint expressions for stable compare with model-side schema.
@@ -377,23 +471,27 @@ class PostgreSQLDialect(Dialect):
         PostgreSQL reflection of SQLAlchemy ``Enum(..., native_enum=False)`` CHECK
         constraints uses ``col::text = ANY (ARRAY[...]::text[])`` while the model
         emits ``schema.table.col IN ('a', 'b')``. Both are normalized to
-        ``col IN ('a', 'b')``. See GitHub #9.
+        ``col IN ('a', 'b')``. Type casts and ``NOT`` formatting are also normalized
+        (GitHub #9, #12 Gap 4).
         """
-        expr = " ".join(expression.split()).strip()
-        while expr.startswith("(") and expr.endswith(")"):
-            expr = expr[1:-1].strip()
+        expr = normalize_check_expression_text(expression)
+        expr = self._strip_pg_type_casts(expr)
+        expr = self._normalize_pg_identifier_parens(expr)
 
-        any_match = re.match(
-            r"^(.+?)::text\s*=\s*ANY\s*\(\s*ARRAY\[(.+?)\](?:::\s*text\[\])?\s*\)$",
-            expr,
-            re.IGNORECASE,
-        )
-        if any_match:
-            col = self._strip_table_qualified_column(any_match.group(1), table_def)
-            values = self._parse_quoted_string_literal_list(any_match.group(2))
-            if values is not None:
-                literals = ", ".join(f"'{v}'" for v in values)
-                return f"{col} IN ({literals})"
+        enum_in = self._normalize_enum_any_to_in(expr, table_def)
+        if enum_in is not None:
+            return enum_in
+
+        in_match = re.match(r"^(.+?)\s+IN\s*\((.+)\)$", expr, re.IGNORECASE)
+        if in_match:
+            normalized = self._normalize_in_expression(in_match.group(1), in_match.group(2), table_def)
+            if normalized is not None:
+                return normalized
+
+        expr = self._normalize_check_not_syntax(expr)
+        expr = strip_redundant_comparison_parens(expr)
+        expr = normalize_or_and_group_parens(expr)
+        expr = normalize_check_expression_text(expr)
 
         in_match = re.match(r"^(.+?)\s+IN\s*\((.+)\)$", expr, re.IGNORECASE)
         if in_match:
@@ -421,9 +519,7 @@ class PostgreSQLDialect(Dialect):
         """
         if default_expr is None:
             return None
-        expr = default_expr.strip()
-        while expr.startswith("(") and expr.endswith(")"):
-            expr = expr[1:-1].strip()
+        expr = strip_outer_parens(default_expr.strip())
         literal_cast = re.match(
             r"^('(?:[^']|'')*')::(?:date|time(?:stamp)?(?:\s+with(?:out)?\s+time\s+zone)?)$",
             expr,
@@ -470,6 +566,8 @@ class PostgreSQLDialect(Dialect):
                         default=None,
                         comment=col.comment,
                         autoincrement=True,
+                        backfill_column=col.backfill_column,
+                        backfill_sql=col.backfill_sql,
                     )
                 )
             else:
@@ -483,6 +581,8 @@ class PostgreSQLDialect(Dialect):
                         default=self._normalize_default_expr(col.default),
                         comment=col.comment,
                         autoincrement=False,
+                        backfill_column=col.backfill_column,
+                        backfill_sql=col.backfill_sql,
                     )
                 )
 

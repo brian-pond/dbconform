@@ -17,6 +17,7 @@ from dbconform.internal.objects import (
 )
 from dbconform.internal.types import CanonicalType
 from dbconform.sql_dialect.base import Dialect
+from dbconform.sql_dialect.check_expression import format_check_expression_for_ddl
 
 
 class SQLiteDialect(Dialect):
@@ -86,7 +87,8 @@ class SQLiteDialect(Dialect):
             parts.append(f"{name_part}FOREIGN KEY ({cols}) REFERENCES {ref} ({ref_cols})")
         for ck in table.check_constraints:
             name_part = f"CONSTRAINT {self._quote(ck.name)} " if ck.name else ""
-            parts.append(f"{name_part}CHECK ({ck.expression})")
+            body = format_check_expression_for_ddl(ck.expression)
+            parts.append(f"{name_part}CHECK ({body})")
         body = ", ".join(parts)
         tbl = self.qualified_table(table.name)
         return f"CREATE TABLE {tbl} ({body})"
