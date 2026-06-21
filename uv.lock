@@ -330,7 +330,7 @@ wheels = [
 
 [[package]]
 name = "dbconform"
-version = "1.0.5"
+version = "1.0.6"
 source = { editable = "." }
 dependencies = [
     { name = "sqlalchemy" },
@@ -340,6 +340,9 @@ dependencies = [
 async = [
     { name = "aiosqlite" },
     { name = "asyncpg" },
+]
+dbt = [
+    { name = "pyyaml" },
 ]
 dev = [
     { name = "build" },
@@ -364,13 +367,14 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
+    { name = "pyyaml", marker = "extra == 'dbt'", specifier = ">=6" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "sqlmodel", marker = "extra == 'dev'" },
     { name = "twine", marker = "extra == 'dev'" },
     { name = "typer", marker = "extra == 'dev'", specifier = ">=0.9" },
 ]
-provides-extras = ["async", "dev", "postgres"]
+provides-extras = ["async", "dbt", "dev", "postgres"]
 
 [[package]]
 name = "decli"

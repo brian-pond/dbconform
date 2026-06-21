@@ -96,6 +96,70 @@ Elements that dbconform compares and corrects (add/alter as per default behavior
 - **Goal**: Support indicating that a column was renamed in the model (e.g. `bar` → `baz` on table `foo`). Some databases support `RENAME COLUMN`; others require: add new column → copy data from old column → drop old column.
 - **Open design**: How to indicate a rename in the model (SQLAlchemy/SQLModel) so dbconform can distinguish "new column + drop old" from "rename" and avoid treating it as two unrelated changes. This is targeted for a future phase (Phase 2).
 
+## dbt integration (optional extra)
+
+### Overview
+`dbconform[dbt]` is an optional package extra that generates dbt `schema.yml` files from
+SQLAlchemy/SQLModel models. It lives in `dbconform.integrations.dbt`, isolated from core logic.
+The extra installs only `pyyaml`; dbt itself is not a dependency.
+
+### BR-DBT-001: Submodule isolation
+The dbt integration lives exclusively in `dbconform.integrations.dbt`. It does not modify or
+import from core conformance logic (`conform`, `plan`, `compare`, `sql_dialect`). Importing it
+without the `[dbt]` extra raises `ImportError` with an actionable install message.
+
+### BR-DBT-002: Internal schema as source of truth
+Generation is driven entirely by the same `TableDef` / `ColumnDef` / constraint objects that
+dbconform already builds from SQLAlchemy models. No additional model introspection is added.
+
+### BR-DBT-003: Test mapping
+The following dbt tests are emitted based on the internal schema:
+
+| Source | dbt test |
+|--------|----------|
+| `ColumnDef.nullable = False` | `not_null` on that column |
+| `PrimaryKeyDef` columns | `not_null` + `unique` on each PK column |
+| `UniqueDef` (single column) | `unique` on that column |
+| `UniqueDef` (multi-column) | YAML comment noting `dbt_utils.unique_combination_of_columns` |
+| `IndexDef.unique = True` (single column) | `unique` on that column (deduplicated) |
+| `ForeignKeyDef` | `relationships` test: `to: ref('table_name')`, `field: ref_column` |
+| `ColumnDef.comment` | `description:` on the column |
+| `TableDef.comment` | `description:` on the model |
+| `CheckDef` | Not mapped (skipped; out of scope for v1) |
+
+### BR-DBT-004: Output modes
+- Single model → YAML string (library) or stdout (CLI).
+- List of models → unified `schema.yml` (all models in one file).
+- List of models with `per_model=True` + `output_dir` → one `schema.yml` per model (named `<table_name>.schema.yml`).
+
+### BR-DBT-005: Library API
+
+```python
+from dbconform.integrations.dbt import generate_schema_yml
+from pathlib import Path
+
+yaml_str = generate_schema_yml(User)                            # single model, returns str
+yaml_str = generate_schema_yml([User, Order])                   # multiple models, returns str
+generate_schema_yml([User, Order], output_path=Path("schema.yml"))           # write unified file
+generate_schema_yml([User, Order], output_dir=Path("models/"), per_model=True)  # per-model files
+```
+
+### BR-DBT-006: CLI command
+
+```
+dbconform dbt generate <MODULE:CLASS> [<MODULE:CLASS> ...] [--output FILE] [--output-dir DIR] [--per-model]
+```
+
+- `MODULE:CLASS` — dotted import path and class name, e.g. `myapp.models:User`.
+- `--output FILE` — write unified output to FILE (default: stdout).
+- `--output-dir DIR` + `--per-model` — write one `schema.yml` per model.
+- Models loaded via `importlib`; caller must run from their virtualenv.
+- Missing `[dbt]` extra: command exits 1 with a clear install message.
+
+### BR-DBT-007: FK reference strategy
+Foreign key `relationships` tests always emit `ref('table_name')`. Users edit `source()` references
+manually. A future v2 may ingest an existing `schema.yml` to auto-resolve `ref` vs `source`.
+
 ## Acceptance criteria
 Acceptance is demonstrated by unit tests: given any in-scope model, synchronization to a real SQL database must succeed. Required coverage:
 

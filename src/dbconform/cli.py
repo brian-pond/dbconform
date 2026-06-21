@@ -411,6 +411,118 @@ def run_test_suite() -> None:
     raise typer.Exit(exit_code)
 
 
+# --- dbt group ---
+dbt_app = typer.Typer(help="dbt integration: generate schema.yml from SQLAlchemy models.")
+app.add_typer(dbt_app, name="dbt")
+
+
+@dbt_app.callback(invoke_without_command=True)
+def _dbt_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+
+
+def _load_model_class(spec: str) -> type:
+    """
+    Load a model class from a ``module.path:ClassName`` specifier.
+
+    Raises ``typer.Exit(1)`` with a clear message on any import or attribute error.
+    Traceability: docs/requirements/01-functional.md (BR-DBT-006).
+    """
+    import importlib
+
+    if ":" not in spec:
+        typer.echo(
+            f"Invalid model specifier {spec!r}. Expected format: myapp.models:ClassName",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    module_path, class_name = spec.rsplit(":", 1)
+    try:
+        module = importlib.import_module(module_path)
+    except ModuleNotFoundError as exc:
+        typer.echo(f"Cannot import module {module_path!r}: {exc}", err=True)
+        raise typer.Exit(1)  # noqa: B904
+
+    cls = getattr(module, class_name, None)
+    if cls is None:
+        typer.echo(f"Class {class_name!r} not found in module {module_path!r}.", err=True)
+        raise typer.Exit(1)
+    return cls
+
+
+@dbt_app.command("generate")
+def dbt_generate(
+    model_specs: list[str] = typer.Argument(
+        ...,
+        metavar="MODULE:CLASS",
+        help=(
+            "One or more model specifiers in the form 'myapp.models:ClassName'. "
+            "The caller's virtualenv must include the models package."
+        ),
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write unified schema.yml to FILE (default: print to stdout).",
+    ),
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Directory for per-model schema files. Use with --per-model.",
+    ),
+    per_model: bool = typer.Option(
+        False,
+        "--per-model",
+        help="Write one <table>.schema.yml per model into --output-dir.",
+    ),
+) -> None:
+    """
+    Generate a dbt schema.yml from SQLAlchemy/SQLModel model classes.
+
+    Requires the [dbt] extra: pip install 'dbconform[dbt]'
+
+    Examples:
+
+        dbconform dbt generate myapp.models:User --output schema.yml
+
+        dbconform dbt generate myapp.models:User myapp.models:Order --output-dir ./models/ --per-model
+
+    Traceability: docs/requirements/01-functional.md (BR-DBT-006).
+    """
+    try:
+        from dbconform.integrations.dbt import generate_schema_yml
+    except ImportError:
+        typer.echo(
+            "The [dbt] extra is required. Install with: pip install 'dbconform[dbt]'",
+            err=True,
+        )
+        raise typer.Exit(1)  # noqa: B904
+
+    if not model_specs:
+        typer.echo("At least one MODEL:CLASS specifier is required.", err=True)
+        raise typer.Exit(1)
+
+    models = [_load_model_class(spec) for spec in model_specs]
+
+    try:
+        result = generate_schema_yml(
+            models,
+            output_path=output,
+            output_dir=output_dir,
+            per_model=per_model,
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1)  # noqa: B904
+
+    if result is not None:
+        typer.echo(result, nl=False)
+
+
 def main() -> None:
     """Entry point for the dbconform script."""
     app()

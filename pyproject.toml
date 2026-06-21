@@ -30,6 +30,9 @@ async = [
     "aiosqlite",
     "asyncpg",
 ]
+dbt = [
+    "pyyaml>=6",
+]
 dev = [
     "build",
     "commitizen",

@@ -1,5 +1,7 @@
 # dbconform
 
+> **New in this release:** Auto-generate dbt `schema.yml` files from your SQLAlchemy models — perfect for protecting your data mart tables. [Jump to dbt integration →](#dbt-integration-optional)
+
 **Your database schema has drifted. `dbconform` fixes it.**
 
 Over time, databases can diverge from your SQLAlchemy models — columns get added manually, constraints go missing, a hotfix gets applied directly to the DB and never captured in code. This is *database drift*, and it's a real-world, compounding problem.
@@ -68,6 +70,7 @@ Optional extras:
 pip install dbconform[postgres]        # PostgreSQL support (psycopg)
 pip install dbconform[async]           # Async drivers (aiosqlite, asyncpg)
 pip install dbconform[async,postgres]  # Both
+pip install dbconform[dbt]             # dbt schema.yml generation (pyyaml)
 ```
 
 **Requirements:** Python 3.11+
@@ -307,6 +310,92 @@ if isinstance(result, ConformError):
 else:
     print(f"Would apply {len(result.steps)} step(s)")
 ```
+
+---
+
+## dbt Integration (optional)
+
+If you use **dbt** alongside SQLAlchemy, you likely know the pain: your mart tables need a `schema.yml` to get `not_null`, `unique`, and `relationships` tests — and hand-writing that file is tedious and error-prone.
+
+**Why marts specifically?** Staging and intermediate models are dbt's internal plumbing — transient, frequently restructured, and typically not worth the effort of defining SQLAlchemy models. But your **mart tables** are different. They're the final output: the tables Tableau, Power BI, Superset, or your data scientists query every day. If a column goes nullable, a foreign key vanishes, or a constraint is silently dropped, *your dashboards break*. That's exactly what dbconform was built to protect — and now it can tell dbt about those protections too.
+
+The pattern: define your mart tables as SQLAlchemy models, run `dbconform` to keep the schema conformant at the database level, and use `dbconform[dbt]` to generate the `schema.yml` so dbt can test the same guarantees at runtime.
+
+### Library
+
+```python
+from dbconform.integrations.dbt import generate_schema_yml
+from pathlib import Path
+from myapp.marts import CustomerMart, SalesFact, ProductDim
+
+# Print to stdout
+print(generate_schema_yml([CustomerMart, SalesFact, ProductDim]))
+
+# Or write directly
+generate_schema_yml(
+    [CustomerMart, SalesFact, ProductDim],
+    output_path=Path("models/marts/schema.yml"),
+)
+```
+
+### CLI
+
+```bash
+# Unified schema.yml for all mart models
+dbconform dbt generate \
+    myapp.marts:CustomerMart \
+    myapp.marts:SalesFact \
+    myapp.marts:ProductDim \
+    --output models/marts/schema.yml
+
+# One file per model
+dbconform dbt generate \
+    myapp.marts:CustomerMart \
+    myapp.marts:SalesFact \
+    --output-dir models/marts/ --per-model
+```
+
+### What gets generated
+
+Given a `CustomerMart` model with a primary key, a non-nullable FK to `dim_date`, and a column comment:
+
+```yaml
+version: 2
+models:
+  - name: customer_mart
+    description: Final customer dimension for BI consumption
+    columns:
+      - name: customer_id
+        data_tests:
+          - not_null
+          - unique
+      - name: date_key
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: lifetime_value
+        data_tests:
+          - not_null
+```
+
+> **dbt version note:** `data_tests:` is the current key name (dbt v1.8+). The older `tests:` key still works for backward compatibility but is considered legacy.
+
+**Mapping summary:**
+
+| SQLAlchemy model | dbt test |
+|---|---|
+| Primary key column | `not_null` + `unique` |
+| `nullable=False` column | `not_null` |
+| Single-column `UniqueConstraint` | `unique` |
+| `ForeignKey(...)` | `relationships` (uses `ref('table_name')`) |
+| `Column(..., comment="...")` | `description:` |
+| `__table_args__ = {"comment": "..."}` | model `description:` |
+
+> **FK references:** Foreign keys always emit `ref('table_name')`. If the referenced table is a dbt `source()` rather than a model, edit those entries manually — or use the library API to post-process the YAML string before writing.
+
+> **Multi-column unique constraints** (e.g. `UniqueConstraint("col_a", "col_b")`) cannot be expressed with dbt's built-in tests. A `meta.dbconform_notes` comment is added to remind you to add `dbt_utils.unique_combination_of_columns` manually.
 
 ---
 

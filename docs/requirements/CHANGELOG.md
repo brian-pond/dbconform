@@ -5,6 +5,8 @@ All notable changes to the requirements docs are documented here.
 ## [Unreleased]
 
 ### Added
+- **dbt integration (`dbconform[dbt]`):** New optional extra `[dbt]` (requires `pyyaml>=6`). Adds `dbconform.integrations.dbt` submodule with `generate_schema_yml()` library function and `dbconform dbt generate` CLI command. Generates dbt `schema.yml` (version 2) from SQLAlchemy/SQLModel models, mapping `not_null`, `unique`, `relationships` (FK), and column/table descriptions. See 01-functional (dbt integration, BR-DBT-001 – BR-DBT-007).
+
 - **Skipped-step severity:** `SkippedStep` carries `category` and `severity` (`warning` | `error`). Harmful drift (missing model columns/constraints; extra NOT NULL columns without DEFAULT) causes `compare()` / `apply_changes()` to return `ConformError`. Benign drift (nullable extras, column shrink blocked, extra constraints not dropped) emits stderr warnings only. See 01-functional (Skipped steps).
 - **NOT NULL backfill (GitHub #12 Gap 1):** Adding a NOT NULL column to a non-empty table is skipped by default; opt in with `allow_not_null_backfill=True` for multi-step add → UPDATE backfill → SET NOT NULL. Backfill via `Column.info["dbconform_backfill"]`, `Column.info["dbconform_backfill_sql"]`, column default, or — when `backfill_sentinel_timestamps=True` — sentinel date/timestamp literals. See 01-functional (Opt-in flags, Data operations).
 - **`ConformError.plan`:** When compare/apply fails due to blocking skipped steps, the built `ConformPlan` is attached on `ConformError.plan` for inspection without re-running compare. See 01-functional (Error handling).

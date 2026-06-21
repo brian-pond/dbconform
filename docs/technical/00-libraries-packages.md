@@ -17,6 +17,14 @@ Single place for dbconform library and package choices: rationale, alternatives,
 
 - **SQLAlchemy** (>=2.0): Used for metadata inspection (code models → model-side internal schema) and reflection (database-side internal schema). SQLModel builds on SQLAlchemy; callers may pass either SA or SQLModel models. See [01-functional](../requirements/01-functional.md) (Model frameworks).
 
+## Optional dependencies (integrations)
+
+- **`[dbt]`** (pyproject.toml): Enables the `dbconform.integrations.dbt` submodule for generating
+  dbt `schema.yml` files from SQLAlchemy models.
+  - **pyyaml** (>=6): YAML serialization. Chosen for ubiquity and stability; no dbt-core dependency
+    is introduced. See [01-functional](../requirements/01-functional.md) (dbt integration,
+    BR-DBT-001 – BR-DBT-007).
+
 ## Optional dependencies (test / backend)
 
 - **`[postgres]`** (pyproject.toml): Used only for running integration tests against PostgreSQL.
