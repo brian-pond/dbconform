@@ -38,7 +38,7 @@ Alembic is excellent when you start clean -and- stay disciplined. But that's jus
 | Create new tables | ✅ | ✅ | ✅ | ✅ |
 | Alter existing tables | ❌ | ✅ | ✅ | ✅ |
 | Can fix schema drift | ❌ | ❌ | ✅ | ✅ |
-| Works without migration history | ✅ | ❌ | ❌ | ✅ |
+| Works without migration history | ✅ | ❌ | ✅ | ✅ |
 | Pure Python, `pip install` | ✅ | ✅ | ❌ | ✅ |
 | SQLite rebuild capabilities | ❌ | ❌ | ❌ | ✅ |
 | Safe defaults (no accidental drops) | ✅ | ⚠️ | ⚠️ | ✅ |
