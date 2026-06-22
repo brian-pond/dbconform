@@ -40,7 +40,7 @@ Alembic is excellent when you start clean -and- stay disciplined. But that's jus
 | Can fix schema drift | ❌ | ❌ | ✅ | ✅ |
 | Works without migration history | ✅ | ❌ | ✅ | ✅ |
 | Pure Python, `pip install` | ✅ | ✅ | ❌ | ✅ |
-| SQLite rebuild capabilities | ❌ | ❌ | ❌ | ✅ |
+| SQLite rebuild capabilities | ❌ | ❌ | ⚠️ | ✅ |
 | Safe defaults (no accidental drops) | ✅ | ⚠️ | ⚠️ | ✅ |
 | In-process, programmatic | ✅ | ✅ | ❌ | ✅ |
 
